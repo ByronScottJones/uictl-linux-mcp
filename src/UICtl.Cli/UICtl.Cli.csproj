@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\UICtl.Core\UICtl.Core.csproj" />
+    <ProjectReference Include="..\UICtl.Ipc\UICtl.Ipc.csproj" />
+    <ProjectReference Include="..\UICtl.Mcp\UICtl.Mcp.csproj" />
+    <ProjectReference Include="..\UICtl.Gui\UICtl.Gui.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>uictl</AssemblyName>
+    <RootNamespace>UICtl.Cli</RootNamespace>
+  </PropertyGroup>
+
+</Project>

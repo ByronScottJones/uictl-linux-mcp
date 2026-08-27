@@ -142,13 +142,27 @@ uictl-linux-mcp/
   tests/
     UICtl.Core.Tests/  # xunit, referencing UICtl.Core
   gnome-extension/     # companion GNOME Shell extension (GJS), own install/versioning
-  uictl.sln
+  uictl.slnx
 ```
 
 Project references: `UICtl.Ipc` → `UICtl.Core`; `UICtl.Mcp` → `UICtl.Ipc`;
 `UICtl.Gui` → `UICtl.Core`; `UICtl.Cli` → all of the above;
 `UICtl.Core.Tests` → `UICtl.Core`. `UICtl.Cli`'s `AssemblyName` is set to
 `uictl` so the built binary is `uictl`, not `UICtl.Cli`.
+
+## Development filesystem note
+
+This repo's canonical working copy lives in WSL's **native** filesystem
+(`~/dev/uictl-linux-mcp` inside Ubuntu 26.04, i.e. `ext4`), not under
+`/mnt/c/...`. Building this solution from WSL against a Windows-mounted
+DrvFs path fails intermittently with `MSB3374` ("last access/last write
+time... cannot be set") — a known DrvFs/9p timestamp-handling reliability
+issue, confirmed empirically while scaffolding this repo (the exact same
+solution built cleanly once moved to native `ext4`). Edit files from Windows
+tooling via the UNC path
+(`\\wsl.localhost\Ubuntu-26.04\home\<user>\dev\uictl-linux-mcp`) if needed;
+always `dotnet build`/`run`/`test` from inside WSL against the native path,
+never `/mnt/c/...`.
 
 ## Build plan / phases
 
