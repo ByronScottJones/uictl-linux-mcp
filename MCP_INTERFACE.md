@@ -298,7 +298,11 @@ a pre-filled "new issue" page rather than filing anything itself. See
 `uictl-win-mcp`'s copy of this file for the full `FeedbackEntry` shape and
 per-tool `data` details, which this repo matches exactly.
 
-- Linux: default repo is `byronjones-elsevier/uictl-linux-mcp`; token
+- Linux: default repo is `ByronScottJones/uictl-linux-mcp` (this repo lives
+  under the personal account, not the `ByronJones-Elsevier` org the other
+  two platforms use — the WSL `gh` session hit an SSO-authorization gap
+  against that org when this repo was created; revisit if/when that's
+  sorted out). Token
   resolution (`--token` / `token` param → `$GITHUB_TOKEN` → `gh auth token`)
   and the duplicate-check REST call are the same shape as the other two
   platforms, via `HttpClient`/`System.Diagnostics.Process` (same as
