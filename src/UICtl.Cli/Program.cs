@@ -1,1 +1,25 @@
-﻿Console.WriteLine("Hello, World!");
+using System.CommandLine;
+using System.CommandLine.Help;
+using UICtl.Cli.Commands;
+
+var root = new RootCommand(
+    "Find, inspect, and drive running Linux/GNOME GUI apps from the command line or from an MCP client. " +
+    "Every command prints one JSON object to stdout and exits 0 on success, non-zero on failure. " +
+    "A small daemon (auto-started on first use) holds platform state across invocations - see `uictl daemon status`.");
+
+// Global CLI convention (see ~/.claude/agents/*.md's "CLI and TUI Applications"
+// rule): -h, -H, --help, --HELP, -? should all show help. System.CommandLine's
+// built-in HelpOption already covers -h/--help/-?/?; add the uppercase aliases.
+var help = root.Options.OfType<HelpOption>().First();
+help.Aliases.Add("-H");
+help.Aliases.Add("--HELP");
+
+root.Add(DaemonCommands.Daemon());
+
+// More subcommands land here phase by phase (permissions/apps/windows/
+// displays/activate, focus, screenshot/elements, click/move/scroll/type/key,
+// wait-for/ocr/pixel, clipboard, feedback, log, mcp) - see ENGINEERING.md's
+// build plan. Kept minimal for now so the daemon/IPC round trip can be
+// proven end-to-end before any platform capability exists.
+
+return await root.Parse(args).InvokeAsync();
