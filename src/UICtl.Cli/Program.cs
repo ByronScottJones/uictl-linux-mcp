@@ -15,11 +15,13 @@ help.Aliases.Add("-H");
 help.Aliases.Add("--HELP");
 
 root.Add(DaemonCommands.Daemon());
+root.Add(QueryCommands.Apps());
+root.Add(QueryCommands.Windows());
+root.Add(CaptureCommands.Elements());
+root.Add(InputCommands.Type());
 
-// More subcommands land here phase by phase (permissions/apps/windows/
-// displays/activate, focus, screenshot/elements, click/move/scroll/type/key,
-// wait-for/ocr/pixel, clipboard, feedback, log, mcp) - see ENGINEERING.md's
-// build plan. Kept minimal for now so the daemon/IPC round trip can be
-// proven end-to-end before any platform capability exists.
+// More subcommands land here phase by phase (permissions/displays/activate,
+// focus, screenshot, click/move/scroll/key, wait-for/ocr/pixel, clipboard,
+// feedback, log, mcp) - see ENGINEERING.md's build plan.
 
 return await root.Parse(args).InvokeAsync();

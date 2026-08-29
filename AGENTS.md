@@ -109,6 +109,15 @@ implement an ATK/AT-SPI bridge properly) don't expose useful nodes via
 - **`type` without `--element`** sends keystrokes to whatever currently has
   keyboard focus, system-wide — make sure you've clicked into the right
   field first.
+- **`elements`' `value` field is not always populated even when `type`
+  worked.** It's read from AT-SPI's `Text` interface, but some widgets'
+  outer accessible (e.g. GtkSourceView's `text box` role in GNOME Text
+  Editor) don't expose `Text` directly even though `EditableText.SetTextContents`
+  on that same object succeeds — confirmed live: the window title (which
+  GNOME Text Editor derives from buffer content) updated correctly after
+  `type` even though the immediately-following `elements` call showed
+  `"value": null`. Don't treat a null `value` as proof `type` failed;
+  cross-check some other visible effect (title, a re-render, `ocr`) instead.
 - **The daemon caches state.** If you rebuild `uictl` during development,
   run `uictl daemon stop` before your next command.
 - **Screenshots/OCR/elements output isn't redacted.** Unlike `type` and
