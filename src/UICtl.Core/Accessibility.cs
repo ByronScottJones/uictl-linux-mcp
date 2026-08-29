@@ -221,8 +221,30 @@ public static class Accessibility
             var editable = Conn.CreateProxy<IAtspiEditableText>(busName, path);
             return await editable.SetTextContentsAsync(text);
         });
-        if (!ok)
-            throw new UiCtlException($"element {elementId} did not accept a direct text value set (no synthesized-keystroke fallback yet - see ENGINEERING.md's build plan)");
-        return "atspiValue";
+        if (ok) return "atspiValue";
+
+        // EditableText isn't implemented/didn't take - fall back to
+        // synthesized keystrokes (see the input-synthesis plan). Click the
+        // element's own center first to give it keyboard focus; there's no
+        // reliable AT-SPI focus primitive here (Component.GrabFocus returns
+        // NotSupported in practice - see ENGINEERING.md's activate/focus row).
+        Frame frame = GetElementFrame(elementId);
+        InputSynthesis.Click(frame.Center, MouseButton.Left, count: 1);
+        InputSynthesis.TypeText(text);
+        return "synthesizedKeystrokes";
+    }
+
+    /// <summary>Re-queries an already-known element's current on-screen geometry (screen coordType) directly from AT-SPI, for callers (click --element, the type fallback above) that need it right now rather than from a possibly-stale walk.</summary>
+    public static Frame GetElementFrame(string elementId)
+    {
+        var (busName, path) = ElementStore.Resolve(elementId);
+        return AsyncBridge.RunSync(async () =>
+        {
+            var comp = Conn.CreateProxy<IAtspiComponent>(busName, path);
+            var (x, y, w, h) = await comp.GetExtentsAsync(0);
+            if (w <= 0 || h <= 0 || w >= 100_000 || h >= 100_000)
+                throw new UiCtlException($"element {elementId} has no usable on-screen geometry (not currently visible/laid out?)");
+            return new Frame(x, y, w, h);
+        });
     }
 }

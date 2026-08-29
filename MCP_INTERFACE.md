@@ -150,7 +150,7 @@ since the underlying concepts differ:
 
 - macOS: `{"accessibility": bool, "screenRecording": bool}`.
 - Windows: `{"elevated": bool, "targetProcessElevated": bool | null, "interactive": bool}`.
-- Linux: `{"sessionType": "x11" | "wayland", "inputMethod": "uinput" | "xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool | null, "interactive": bool}`.
+- Linux: `{"sessionType": "x11" | "wayland", "inputMethod": "uinput" | "xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool | null, "interactive": bool, "preflightReady": bool, "preflightAt": string | null, "preflightManualSteps": string[], "preflightChecks": {[name: string]: bool}}`.
   `sessionType` is detected from `$WAYLAND_DISPLAY`/`$DISPLAY` (**not**
   `$XDG_SESSION_TYPE` alone — observed unset even in a real Wayland session
   during development). `shellExtensionConnected` is `null` on an X11
@@ -162,6 +162,18 @@ since the underlying concepts differ:
   testing over SSH" below) — every other Linux-specific command that
   touches the screen, input, or the clipboard silently no-ops or fails when
   this is `false`, rather than raising a distinct error of its own.
+  `preflightReady`/`preflightAt`/`preflightManualSteps`/`preflightChecks`
+  mirror `scripts/preflight.sh`'s own `ready`/`ranAt`/
+  `manualStepsRemaining`/`checks` fields, read from
+  `~/.uictl/preflight.json` (which that script writes) — `preflightReady:
+  false, preflightAt: null` means the script has never been run at all;
+  `false` with a non-null `preflightAt` means it ran but isn't fully ready
+  yet, with `preflightManualSteps` naming what's left (e.g. "log out and
+  back in") and `preflightChecks` giving the full per-check breakdown
+  (`{"dotnet": true, "inputGroup": false, ...}`) so a caller can see
+  exactly which check(s) failed without re-reading the raw file itself.
+  This lets a caller (human or agent) distinguish "never set up" from "set
+  up, but something's still not ready" — and what to do about it.
 
 ### `uictl_apps`
 
@@ -231,10 +243,28 @@ hold is active.
 `data`: `{"moved": true}` / `{"scrolled": true}`, plus `"focusHold"` while a
 hold is active.
 
+- Linux: `scroll`'s sign convention (not yet pinned down elsewhere in this
+  file) - `dy > 0` scrolls content **down** (matches DOM `wheel` event
+  `deltaY`), `dx > 0` scrolls **right**. Translated internally to the
+  kernel's inverted `REL_WHEEL` convention (positive = up) - see
+  `ENGINEERING.md`'s input synthesis notes. Other platforms should match
+  this or explicitly document a divergence.
+
 ### `uictl_type`
 
 `data`: `{"method": "atspiValue" | "synthesizedKeystrokes", "element": string?}`, plus `"focusHold"` while a hold is active.
 
+- Linux: synthesized keystrokes (`method: "synthesizedKeystrokes"`, whether
+  from omitting `--element` or from the `EditableText`-fails fallback) only
+  support ASCII characters typeable on a US-QWERTY layout - `uinput`/evdev
+  `KEY_*` codes are physical-key codes, not a Unicode-insertion primitive.
+  An unsupported character throws naming it, rather than silently dropping
+  it. Arbitrary Unicode still works via the `atspiValue` tier on any widget
+  that implements `EditableText`. The element fallback additionally
+  synthesizes a left click at the element's center first, to give it
+  keyboard focus (there's no reliable AT-SPI focus primitive here -
+  `Component.GrabFocus` returns `NotSupported` in practice, see
+  `ENGINEERING.md`'s activate/focus row), before synthesizing the text.
 - Linux: `method` values are `"atspiValue"` (AT-SPI `EditableText`/`Text`
   interface direct value set, the equivalent of macOS's AX value set or
   Windows' `ValuePattern`) or `"synthesizedKeystrokes"` (uinput/XTest, the

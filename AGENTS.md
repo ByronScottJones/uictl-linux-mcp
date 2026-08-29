@@ -109,6 +109,37 @@ implement an ATK/AT-SPI bridge properly) don't expose useful nodes via
 - **`type` without `--element`** sends keystrokes to whatever currently has
   keyboard focus, system-wide — make sure you've clicked into the right
   field first.
+- **Synthesized keystrokes are ASCII/US-QWERTY only.** This covers `type`
+  without `--element`, and the fallback `type --element` takes when a
+  widget doesn't expose AT-SPI `EditableText` directly. `uinput`/evdev
+  key codes are physical-key codes, not a Unicode-insertion primitive — a
+  character outside US-QWERTY (accents, non-Latin scripts, emoji) throws
+  rather than silently dropping it. If you need to type non-ASCII text,
+  target a widget that accepts a direct AT-SPI value set instead (the
+  `atspiValue` method tier has no such limit) — or fall back to
+  `clipboard set` + a paste keystroke once clipboard support lands.
+- **Nested elements' frames are unreliable — only trust large/top-anchored
+  ones for `click --element`.** Confirmed live: AT-SPI reports a real,
+  correct on-screen frame for a window's own top-level accessible, but a
+  **degenerate `(0,0)` origin for every nested child element**, regardless
+  of its true position (every button in a `gnome-calculator` keypad grid
+  reports the same `x:0,y:0` as every other one). `click --element` /
+  `type --element`'s click-to-focus fallback compute a target from the
+  element's frame center, so this only works for elements that dominate the
+  window (a full-width text box, say) — clicking a specific small button
+  by `--element` id is **not** currently reliable. Prefer `click --at` with
+  a coordinate you've confirmed some other way until this is root-caused
+  (see `ENGINEERING.md`'s "Coordinate spaces" section).
+- **`/dev/uinput` needs both group membership and a udev grant.** Being in
+  the `input` group (see the Input setup section below) is necessary but
+  not always sufficient — confirmed live on this project's dev machine,
+  `/dev/uinput` shipped `root:root` mode `0600` with no group grant at all,
+  so `usermod -aG input` alone left `uictl permissions`' `uinputWritable`
+  false. Check that field before assuming click/type/scroll/key will work.
+  `scripts/preflight.sh` runs (and re-runs) every setup check at once and
+  records the result at `~/.uictl/preflight.json` — `uictl permissions`'
+  `preflightReady`/`preflightAt`/`preflightManualSteps` fields surface that
+  same status without you having to re-derive it check by check.
 - **`elements`' `value` field is not always populated even when `type`
   worked.** It's read from AT-SPI's `Text` interface, but some widgets'
   outer accessible (e.g. GtkSourceView's `text box` role in GNOME Text
