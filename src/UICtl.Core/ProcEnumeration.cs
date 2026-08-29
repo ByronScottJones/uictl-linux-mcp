@@ -15,7 +15,7 @@ internal static class ProcEnumeration
 
     public static string TryGetProcessName(int pid)
     {
-        try { return File.ReadAllText($"/proc/{pid}/comm").TrimEnd('\n'); }
+        try { return File.ReadAllText($"/proc/{pid}/comm").Trim(); }
         catch { return ""; }
     }
 }

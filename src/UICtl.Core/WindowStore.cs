@@ -8,7 +8,8 @@ namespace UICtl.Core;
 /// the AT-SPI (busName, path) it came from, so a later `elements --window`/
 /// `screenshot --window` doesn't need windows.list to have encoded the AT-SPI
 /// reference itself into an opaque integer. Replaced wholesale each time
-/// windows.list runs, same spirit as ElementStore.
+/// windows.list runs, same spirit as ElementStore. The daemon serves one
+/// request at a time (see ENGINEERING.md), so this needs no locking.
 /// </summary>
 internal static class WindowStore
 {

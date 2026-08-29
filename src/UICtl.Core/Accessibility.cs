@@ -19,7 +19,9 @@ public static class Accessibility
 
     private static async Task<Connection> ConnectAsync()
     {
-        using var sessionConnection = new Connection(Address.Session!);
+        if (Address.Session is null)
+            throw new UiCtlException("no D-Bus session address available ($DBUS_SESSION_BUS_ADDRESS unset?) - cannot reach AT-SPI");
+        using var sessionConnection = new Connection(Address.Session);
         await sessionConnection.ConnectAsync();
         var bus = sessionConnection.CreateProxy<IA11yBus>("org.a11y.Bus", "/org/a11y/bus");
         string atspiAddress = await bus.GetAddressAsync();
@@ -63,7 +65,12 @@ public static class Accessibility
     public static IReadOnlyList<AppInfo> ListApps(bool includeBackground)
     {
         var atspiApps = AsyncBridge.RunSync(ListAtspiAppsAsync);
-        var appsByPid = atspiApps.ToDictionary(a => a.Pid, a => a.Name);
+        // TryAdd, not ToDictionary: two AT-SPI accessibles can share a pid
+        // (a process registering more than one root accessible) - a
+        // straight ToDictionary throws on the duplicate key and would take
+        // the whole listing down over it.
+        var appsByPid = new Dictionary<int, string>();
+        foreach (var a in atspiApps) appsByPid.TryAdd(a.Pid, a.Name);
 
         IEnumerable<int> pids = appsByPid.Keys;
         if (includeBackground)
@@ -98,7 +105,10 @@ public static class Accessibility
                 string role;
                 try { role = await child.GetRoleNameAsync(); }
                 catch { continue; }
-                if (role != "window" && role != "frame" && role != "dialog") continue;
+                bool isWindowLike = role.Equals("window", StringComparison.OrdinalIgnoreCase)
+                    || role.Equals("frame", StringComparison.OrdinalIgnoreCase)
+                    || role.Equals("dialog", StringComparison.OrdinalIgnoreCase);
+                if (!isWindowLike) continue;
 
                 string title = "";
                 try { title = await child.GetAsync<string>("Name"); } catch { /* leave blank */ }
@@ -169,6 +179,8 @@ public static class Accessibility
                 {
                     var text = Conn.CreateProxy<IAtspiText>(bn, p);
                     int count = await text.GetCharacterCountAsync();
+                    // AT-SPI Text.GetText(startOffset, endOffset) treats
+                    // endOffset as exclusive, so (0, count) is the full string.
                     if (count > 0) value = await text.GetTextAsync(0, count);
                 }
                 catch { /* leave null */ }
