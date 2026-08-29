@@ -109,6 +109,21 @@ tablet, and every write/ioctl succeeds with no error while nothing actually
 happens on screen. Not documented anywhere obvious in the uinput man page;
 found by elimination during live testing.
 
+**Untested: multi-monitor and fractional (HiDPI) scaling.** This dev
+machine is single-monitor (`Virtual-1`, 1518x986 via `xrandr`), so
+`XDisplayWidth`/`XDisplayHeight`'s single "default screen" reading is
+unambiguous here. On a real multi-monitor setup this needs verification,
+not assumption: `XDisplayWidth`/`XDisplayHeight` describe the X11/XWayland
+**virtual screen** (the bounding box of all monitors, per the "Coordinate
+spaces" section above), so a target coordinate should in principle still
+land on the right monitor - but whether libinput actually maps a single
+absolute-pointer *uinput* device's full range across multiple physical
+outputs the same way (rather than pinning it to one output, the common
+behavior for tablet-classified absolute devices) is unverified. Fractional
+scaling is a separate open question in the same vein - not addressed here,
+flagged by PR #2 review, revisit when a multi-monitor/HiDPI machine is
+available to test against.
+
 **Separately, a real and *not yet fixed* limitation surfaced along the
 way**: AT-SPI `Component.GetExtents(coordType=screen)` returns a real,
 correct frame for a window's own top-level accessible, but returns a

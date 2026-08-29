@@ -107,6 +107,20 @@ sudo udevadm trigger --name-match=/dev/uinput   # or reboot if that doesn't pick
 Check `uictl permissions`' `uinputWritable` field to confirm before assuming
 click/type/scroll/key will work.
 
+### Security note
+
+`/dev/uinput` write access — same as the AT-SPI accessibility bus — lets
+any process running as your user synthesize arbitrary keyboard and mouse
+input system-wide, not just into windows this tool launched. That's the
+whole point (it's what makes an agent able to drive a real GUI), but it
+means the trust boundary is "anything that can talk to the daemon's Unix
+socket (`~/.uictl/uictl.sock`, user-only permissions) can act as you at the
+keyboard/mouse." Don't run the daemon, or grant `/dev/uinput`/AT-SPI
+access, on a machine or account you don't trust the caller on. The udev
+rule above (`GROUP="input", MODE="0660"`) is scoped to the `input` group
+specifically for this reason — it doesn't open `/dev/uinput` to every user
+on the box.
+
 ## Architecture in one paragraph
 
 Same shape as macOS and Windows: a thin CLI/MCP front end over a small

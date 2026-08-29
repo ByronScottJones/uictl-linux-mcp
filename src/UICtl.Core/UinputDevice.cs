@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using UICtl.Core.Interop;
 
 namespace UICtl.Core;
@@ -17,6 +19,20 @@ namespace UICtl.Core;
 internal static class UinputDevice
 {
     private static readonly Lazy<Device> LazyDevice = new(Create);
+
+    static UinputDevice()
+    {
+        // The daemon's own stop handling calls Environment.Exit directly
+        // (see DaemonServer.cs) - process teardown would reclaim the fd
+        // and implicitly destroy the kernel-side device either way, but
+        // disposing explicitly here (ProcessExit still fires on
+        // Environment.Exit) is cheap, correct hygiene rather than relying
+        // on that implicit cleanup - PR #2 review comment.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            if (LazyDevice.IsValueCreated) LazyDevice.Value.Dispose();
+        };
+    }
 
     public static void MoveTo(int x, int y)
     {
@@ -107,7 +123,7 @@ internal static class UinputDevice
     {
         int fd = UinputInterop.OpenWriteNonBlock();
         if (fd < 0)
-            throw new UiCtlException($"could not open {UinputInterop.UinputPath} for writing - is $USER in the 'input' group? See `uictl permissions`.");
+            throw new UiCtlException($"could not open {UinputInterop.UinputPath} for writing ({ErrnoMessage()}) - is $USER in the 'input' group? See `uictl permissions`.");
 
         (int width, int height) = XlibScreenInterop.GetScreenSize();
 
@@ -137,11 +153,11 @@ internal static class UinputDevice
         byte[] userDev = UinputInterop.BuildUserDev("uictl-virtual-input", width - 1, height - 1);
         nint written = UinputInterop.write(fd, userDev, (nuint)userDev.Length);
         if (written != userDev.Length)
-            throw new UiCtlException($"failed writing uinput_user_dev to {UinputInterop.UinputPath} (wrote {written} of {userDev.Length} bytes)");
+            throw new UiCtlException($"failed writing uinput_user_dev to {UinputInterop.UinputPath} ({ErrnoMessage()}, wrote {written} of {userDev.Length} bytes)");
 
         int created = UinputInterop.ioctl_noarg(fd, UinputInterop.UiDevCreate);
         if (created < 0)
-            throw new UiCtlException($"UI_DEV_CREATE failed on {UinputInterop.UinputPath}");
+            throw new UiCtlException($"UI_DEV_CREATE failed on {UinputInterop.UinputPath} ({ErrnoMessage()})");
 
         // Give the kernel/compositor a moment to enumerate the new device
         // before the first event - observed necessary in practice for
@@ -155,10 +171,17 @@ internal static class UinputDevice
     {
         int result = UinputInterop.ioctl_int(fd, request, (int)bit);
         if (result < 0)
-            throw new UiCtlException($"uinput ioctl setup failed (request=0x{request:X}, bit={bit})");
+            throw new UiCtlException($"uinput ioctl setup failed (request=0x{request:X}, bit={bit}, {ErrnoMessage()})");
     }
 
-    private sealed class Device
+    /// <summary>Human-readable errno text for the P/Invoke call that just failed - every UinputInterop entry point is declared SetLastError=true. Win32Exception's message maps an errno to strerror() text on Linux, despite the Windows-sounding name.</summary>
+    private static string ErrnoMessage()
+    {
+        int errno = Marshal.GetLastPInvokeError();
+        return $"errno {errno}: {new Win32Exception(errno).Message}";
+    }
+
+    private sealed class Device : IDisposable
     {
         private readonly int _fd;
         public int ScreenWidth { get; }
@@ -178,5 +201,11 @@ internal static class UinputDevice
         }
 
         public void Sync() => Write(UinputInterop.EvSyn, UinputInterop.SynReport, 0);
+
+        public void Dispose()
+        {
+            UinputInterop.ioctl_noarg(_fd, UinputInterop.UiDevDestroy);
+            UinputInterop.close(_fd);
+        }
     }
 }

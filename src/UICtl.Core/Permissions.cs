@@ -48,7 +48,8 @@ public static class Permissions
             Interactive: interactive,
             PreflightReady: preflight.Ready,
             PreflightAt: preflight.At,
-            PreflightManualSteps: preflight.ManualSteps);
+            PreflightManualSteps: preflight.ManualSteps,
+            PreflightChecks: preflight.Checks);
     }
 
     private static bool TryProbeAtspi()
@@ -64,18 +65,23 @@ public static class Permissions
         }
     }
 
+    private static readonly (bool Ready, string? At, IReadOnlyList<string> ManualSteps, IReadOnlyDictionary<string, bool> Checks) EmptyPreflight =
+        (false, null, Array.Empty<string>(), new Dictionary<string, bool>());
+
     /// <summary>
-    /// Never seen scripts/preflight.sh run -&gt; (false, null, []). Ran but
-    /// not fully ready -&gt; (false, &lt;timestamp&gt;, &lt;steps&gt;), so a
-    /// caller can tell "never run" apart from "ran, but something's still
-    /// not ready" - and what to actually do about it. A malformed file
+    /// Never seen scripts/preflight.sh run -&gt; all-empty/false. Ran but
+    /// not fully ready -&gt; a timestamp, the manual steps still needed, and
+    /// which named checks failed (per-check detail requested in PR #2
+    /// review, so a caller doesn't have to re-read the raw file itself to
+    /// see exactly what's wrong) - so a caller can tell "never run" apart
+    /// from "ran, but something's still not ready". A malformed file
     /// (partial write, hand-edited) is treated the same as "never run"
     /// rather than throwing - this is a status hint, not something that
     /// should fail the whole permissions call.
     /// </summary>
-    private static (bool Ready, string? At, IReadOnlyList<string> ManualSteps) ReadPreflightStatus()
+    private static (bool Ready, string? At, IReadOnlyList<string> ManualSteps, IReadOnlyDictionary<string, bool> Checks) ReadPreflightStatus()
     {
-        if (!File.Exists(PreflightPath)) return (false, null, Array.Empty<string>());
+        if (!File.Exists(PreflightPath)) return EmptyPreflight;
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(PreflightPath));
@@ -88,11 +94,17 @@ public static class Permissions
                 foreach (var step in stepsProp.EnumerateArray())
                     if (step.GetString() is { } s) steps.Add(s);
 
-            return (ready, at, steps);
+            var checks = new Dictionary<string, bool>();
+            if (root.TryGetProperty("checks", out var checksProp) && checksProp.ValueKind == JsonValueKind.Object)
+                foreach (var check in checksProp.EnumerateObject())
+                    if (check.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        checks[check.Name] = check.Value.GetBoolean();
+
+            return (ready, at, steps, checks);
         }
         catch
         {
-            return (false, null, Array.Empty<string>());
+            return EmptyPreflight;
         }
     }
 }

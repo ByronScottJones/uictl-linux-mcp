@@ -40,11 +40,12 @@ public sealed record ElementWalkOptions(string? RoleFilter = null, string? Title
 /// concepts differ). <c>SessionType</c> is detected from $WAYLAND_DISPLAY/
 /// $DISPLAY, not $XDG_SESSION_TYPE (observed unset in a real session during
 /// development). <c>ShellExtensionConnected</c> is null on an X11 session.
-/// <c>PreflightReady</c>/<c>PreflightAt</c>/<c>PreflightManualSteps</c>
-/// mirror scripts/preflight.sh's own <c>ready</c>/<c>ranAt</c>/
-/// <c>manualStepsRemaining</c> fields (see Permissions.cs) - lets a caller
-/// tell "preflight never run" apart from "ran, but something's still not
-/// ready" without re-deriving every individual check itself.
+/// <c>PreflightReady</c>/<c>PreflightAt</c>/<c>PreflightManualSteps</c>/
+/// <c>PreflightChecks</c> mirror scripts/preflight.sh's own
+/// <c>ready</c>/<c>ranAt</c>/<c>manualStepsRemaining</c>/<c>checks</c>
+/// fields (see Permissions.cs) - lets a caller tell "preflight never run"
+/// apart from "ran, but something's still not ready", down to exactly
+/// which named check(s) failed, without re-reading the raw file itself.
 /// </summary>
 public sealed record PermissionsStatus(
     string SessionType,
@@ -55,7 +56,8 @@ public sealed record PermissionsStatus(
     bool Interactive,
     bool PreflightReady,
     string? PreflightAt,
-    IReadOnlyList<string> PreflightManualSteps);
+    IReadOnlyList<string> PreflightManualSteps,
+    IReadOnlyDictionary<string, bool> PreflightChecks);
 
 public readonly record struct PixelColor(byte R, byte G, byte B, byte A);
 
