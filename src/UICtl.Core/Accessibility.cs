@@ -162,13 +162,25 @@ public static class Accessibility
                 catch { /* leave zeroed */ }
             }
 
+            string? value = null;
+            if (ifaces.Contains("org.a11y.atspi.Text"))
+            {
+                try
+                {
+                    var text = Conn.CreateProxy<IAtspiText>(bn, p);
+                    int count = await text.GetCharacterCountAsync();
+                    if (count > 0) value = await text.GetTextAsync(0, count);
+                }
+                catch { /* leave null */ }
+            }
+
             bool roleMatches = options.RoleFilter is null || role.Equals(options.RoleFilter, StringComparison.OrdinalIgnoreCase);
             bool titleMatches = options.TitleContains is null || name.Contains(options.TitleContains, StringComparison.OrdinalIgnoreCase);
             if (roleMatches && titleMatches)
             {
                 if (elements.Count >= options.MaxElements) { truncated = true; return; }
                 string id = ElementStore.Register(windowId, bn, p);
-                elements.Add(new ElementInfo(id, role, name, null, frame));
+                elements.Add(new ElementInfo(id, role, name, value, frame));
             }
 
             var children = await acc.GetChildrenAsync();
