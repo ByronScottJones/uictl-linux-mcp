@@ -18,6 +18,13 @@ internal static class QueryCommands
         return cmd;
     }
 
+    public static Command Permissions()
+    {
+        var cmd = new Command("permissions", "Report this session's platform-specific preconditions (uinput writability, AT-SPI, session type, ...) - see MCP_INTERFACE.md's uictl_permissions section.");
+        cmd.SetAction(async (_, ct) => await CliRunner.RunAsync("permissions.status", new Dictionary<string, object?>(), ct));
+        return cmd;
+    }
+
     public static Command Windows()
     {
         var app = new Option<string?>("--app") { Description = "Filter to windows owned by this app (name substring or pid)." };

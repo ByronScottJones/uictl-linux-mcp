@@ -231,10 +231,28 @@ hold is active.
 `data`: `{"moved": true}` / `{"scrolled": true}`, plus `"focusHold"` while a
 hold is active.
 
+- Linux: `scroll`'s sign convention (not yet pinned down elsewhere in this
+  file) - `dy > 0` scrolls content **down** (matches DOM `wheel` event
+  `deltaY`), `dx > 0` scrolls **right**. Translated internally to the
+  kernel's inverted `REL_WHEEL` convention (positive = up) - see
+  `ENGINEERING.md`'s input synthesis notes. Other platforms should match
+  this or explicitly document a divergence.
+
 ### `uictl_type`
 
 `data`: `{"method": "atspiValue" | "synthesizedKeystrokes", "element": string?}`, plus `"focusHold"` while a hold is active.
 
+- Linux: synthesized keystrokes (`method: "synthesizedKeystrokes"`, whether
+  from omitting `--element` or from the `EditableText`-fails fallback) only
+  support ASCII characters typeable on a US-QWERTY layout - `uinput`/evdev
+  `KEY_*` codes are physical-key codes, not a Unicode-insertion primitive.
+  An unsupported character throws naming it, rather than silently dropping
+  it. Arbitrary Unicode still works via the `atspiValue` tier on any widget
+  that implements `EditableText`. The element fallback additionally
+  synthesizes a left click at the element's center first, to give it
+  keyboard focus (there's no reliable AT-SPI focus primitive here -
+  `Component.GrabFocus` returns `NotSupported` in practice, see
+  `ENGINEERING.md`'s activate/focus row), before synthesizing the text.
 - Linux: `method` values are `"atspiValue"` (AT-SPI `EditableText`/`Text`
   interface direct value set, the equivalent of macOS's AX value set or
   Windows' `ValuePattern`) or `"synthesizedKeystrokes"` (uinput/XTest, the

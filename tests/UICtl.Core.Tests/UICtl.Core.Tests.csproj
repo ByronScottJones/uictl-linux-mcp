@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\UICtl.Core\UICtl.Core.csproj" />
+    <ProjectReference Include="..\..\src\UICtl.Ipc\UICtl.Ipc.csproj" />
   </ItemGroup>
 
 </Project>

@@ -88,15 +88,24 @@ and Windows expose — several things are structurally different:
 
 ### Input setup (uinput)
 
-Input synthesis needs write access to `/dev/uinput`:
+Input synthesis needs write access to `/dev/uinput`. Group membership alone
+is not sufficient on a stock Ubuntu 26.04 install — confirmed live during
+development: `/dev/uinput` ships `root:root` mode `0600` with no group grant
+at all, so without the udev rule below, `usermod -aG input` alone still
+leaves `uictl permissions`' `uinputWritable` field `false`.
 
 ```sh
-sudo usermod -aG input $USER   # then start a fresh login session
+sudo usermod -aG input $USER
+
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --name-match=/dev/uinput   # or reboot if that doesn't pick it up
+
+# then start a fresh login session so your shell's group membership updates
 ```
 
-A persistent udev rule may be added later if group membership alone proves
-insufficient across reboots — check `uictl permissions`' `uinputWritable`
-field first.
+Check `uictl permissions`' `uinputWritable` field to confirm before assuming
+click/type/scroll/key will work.
 
 ## Architecture in one paragraph
 

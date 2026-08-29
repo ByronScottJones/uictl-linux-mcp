@@ -27,6 +27,23 @@ internal static class ParamsExtensions
     public static double? GetDoubleOrNull(this JsonElement element, string name) =>
         TryGetNonNull(element, name, out var v) ? v.GetDouble() : null;
 
+    /// <summary>Parses an "x,y" string param (e.g. click/move/scroll's `at`) into a Point.</summary>
+    public static Point? GetPointOrNull(this JsonElement element, string name)
+    {
+        string? raw = element.GetStringOrNull(name);
+        if (raw is null) return null;
+
+        string[] parts = raw.Split(',');
+        if (parts.Length != 2
+            || !double.TryParse(parts[0].Trim(), out double x)
+            || !double.TryParse(parts[1].Trim(), out double y))
+            throw new UiCtlException($"\"{name}\" must be \"x,y\" (got \"{raw}\")");
+        return new Point(x, y);
+    }
+
+    public static Point GetPointOrThrow(this JsonElement element, string name) =>
+        GetPointOrNull(element, name) ?? throw new UiCtlException($"\"{name}\" is required");
+
     private static bool TryGetNonNull(JsonElement element, string name, out JsonElement value)
     {
         if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out value) && value.ValueKind != JsonValueKind.Null)

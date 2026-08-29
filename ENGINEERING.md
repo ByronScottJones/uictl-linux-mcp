@@ -62,11 +62,11 @@ connections to AT-SPI's registry and the Shell extension.
 | activate / focus | AT-SPI has no general activation primitive (`GrabFocus` unsupported in practice) — this is the one area still fully gated on `IWindowBackend`, chosen at runtime by session-type detection. Note: this environment's `$XDG_SESSION_TYPE` was observed **unset** even with `$WAYLAND_DISPLAY` and `$DISPLAY` both present (both WSLg and the real GNOME VM) — detect by checking `$WAYLAND_DISPLAY` first, `$DISPLAY` second, don't rely on `$XDG_SESSION_TYPE` alone. **X11 backend**: direct Xlib P/Invoke against EWMH (`_NET_ACTIVE_WINDOW`, plus `_NET_WM_PID`/`_NET_WM_NAME` where available) — same "raw P/Invoke to the native platform lib" pattern as `NativeMethods.cs` on Windows; note EWMH support can be partial (WSLg's XWayland advertises no `_NET_CLIENT_LIST` at all in `_NET_SUPPORTED`), and **most modern GTK apps run as native Wayland clients even on a real GNOME/Xorg-available desktop** (confirmed: default-launched `gnome-text-editor` is invisible to `xwininfo -root -tree` entirely, X11-only helper windows aside) — so treat the X11 backend as covering genuinely X11-native/forced (`GDK_BACKEND=x11`) apps and Xorg sessions specifically, not the common case. **Wayland/GNOME backend**: D-Bus calls to the companion Shell extension (`gnome-extension/`), since Mutter deliberately exposes no such API to arbitrary outside processes — this is the backend that actually matters for activating a typical modern GNOME app. |
 | displays.list | X11: RandR extension. Wayland/GNOME: `org.gnome.Mutter.DisplayConfig` D-Bus interface — exposed by Mutter itself for `gnome-control-center`, **no custom extension needed** for this one. |
 | screenshot | X11: `XGetImage`/`XShmGetImage`, no permission prompt. Wayland: `org.freedesktop.portal.Screenshot`, or `ScreenCast` + PipeWire for repeat/window-scoped capture — negotiate the portal session once per daemon lifetime and reuse it rather than popping a dialog every call, the closest Linux analog to macOS's one-time Screen Recording grant. |
-| input synthesis | Primary: `/dev/uinput` virtual keyboard+mouse device via P/Invoke `ioctl`/`write` — kernel-level, identical under X11 and Wayland, no per-call dialog, needs one-time device-permission setup (see README). XTest is available as a zero-setup alternative when the session is confirmed X11. |
+| input synthesis | **Implemented** (Phase 2): `/dev/uinput` virtual keyboard+mouse device via P/Invoke `ioctl`/`write` — kernel-level, identical under X11 and Wayland (no `IWindowBackend` split needed, unlike windowing), no per-call dialog. One long-lived absolute-pointer+keyboard device, created once and cached for the daemon's lifetime (`UinputDevice.cs`), ranged to the real X11/XWayland screen pixel size (`Interop/XlibScreenInterop.cs`) rather than a normalized virtual range — see "Coordinate spaces" below. Needs one-time device-permission setup: group membership alone is **not** sufficient on a stock Ubuntu 26.04 install (confirmed live: `/dev/uinput` ships `root:root` mode `0600` with no group grant at all) — a udev rule is also required, see README's Input setup section. Text/key synthesis is US-QWERTY/ASCII-only (`KeyCodes.cs` — `uinput` codes are physical-key codes, not Unicode input); an unsupported character throws rather than silently dropping. XTest remains a documented, not-yet-built zero-setup alternative for a confirmed-X11 session. |
 | OCR | **Tesseract** via the `Tesseract` NuGet (libtesseract P/Invoke wrapper), fully local, no network. Reports real per-word confidence — unlike Windows' `null`, closer to macOS's Vision output. |
 | pixel | X11: 1×1 `XGetImage`. Wayland: sampled from the same screenshot/screencast frame — no cheap standalone primitive exists here, so this is genuinely more expensive than macOS/Windows on Wayland. |
 | clipboard | Shell out to `wl-copy`/`wl-paste` (Wayland) or `xclip` (X11), selected by the same session-type detection as windows. Native-protocol implementation is a possible follow-up if shelling out proves fragile. |
-| permissions.status | New shape (the contract already anticipates per-platform divergence here): `{"sessionType": "x11"|"wayland", "inputMethod": "uinput"|"xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool \| null, "interactive": bool}`. |
+| permissions.status | **Implemented** (Phase 2, `Permissions.cs`): `{"sessionType": "x11"|"wayland", "inputMethod": "uinput"|"xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool \| null, "interactive": bool}`. `inputMethod` always reports `"uinput"` for now (XTest isn't built, so there's nothing to choose between yet). `shellExtensionConnected` is always `false` on Wayland until the companion extension exists (Phase 3). |
 
 ## Coordinate spaces
 
@@ -88,6 +88,50 @@ backend's coordinate space is defined by whatever the extension reports —
 document the exact space (logical vs. physical, scale factor handling) in
 this file once Phase 3 nails it down, the same way macOS's three-space
 writeup and Windows' per-monitor-DPI writeup did.
+
+**Input synthesis's pointer range (Phase 2) — live-verified, with a real caveat found along the way:**
+`UinputDevice` ranges its `ABS_X`/`ABS_Y` axes to the real X11/XWayland
+screen pixel size (`XlibScreenInterop.GetScreenSize`, i.e.
+`XDisplayWidth`/`XDisplayHeight` against the default screen — works over
+XWayland in a Wayland session, same as any other X11 client) rather than a
+normalized virtual range (the `0..65535` convention some uinput tools use).
+
+Confirmed live against `gnome-text-editor` (Wayland-native): clicking at the
+window's own top-level frame center, then synthesizing keystrokes, correctly
+changed the window title (which the app derives from buffer content) -
+proof both that the window-level frame really is real screen-coordinate
+geometry, and that the uinput device correctly lands clicks/keystrokes in
+the right place. Getting there needed one real fix:
+**`UI_SET_PROPBIT`/`INPUT_PROP_POINTER` must be set on the virtual device**
+(`Interop/UinputInterop.cs`) - without it, libinput has no signal that an
+`EV_ABS` device with buttons is a pointer rather than e.g. a graphics
+tablet, and every write/ioctl succeeds with no error while nothing actually
+happens on screen. Not documented anywhere obvious in the uinput man page;
+found by elimination during live testing.
+
+**Separately, a real and *not yet fixed* limitation surfaced along the
+way**: AT-SPI `Component.GetExtents(coordType=screen)` returns a real,
+correct frame for a window's own top-level accessible, but returns a
+**degenerate `(0,0)` origin for every nested child element**, regardless of
+that element's actual on-screen position - confirmed on both
+`gnome-calculator` and `gnome-text-editor` (every element at every depth,
+including sibling buttons laid out side-by-side in a grid, reported
+identical `x:0,y:0`; only width/height varied meaningfully with nesting
+depth). This means `click --element`/the `type --element` fallback's
+click-to-focus step only reliably lands on large, top-anchored elements
+(their computed center still falls in a sensible spot, e.g.
+`gnome-text-editor`'s main text box) - **not** on precisely-positioned small
+widgets like individual buttons in a grid (confirmed: clicking
+`gnome-calculator`'s "7" button via `--element` computed target `(32,22)`,
+nowhere near the actual button). This is a Phase 1 `Accessibility.cs`/AT-SPI
+finding, not an input-synthesis bug - `click --at` with an
+independently-known-correct coordinate is unaffected. Root cause not yet
+investigated (candidates: GTK4's AT-SPI bridge not propagating
+window-position + widget-allocation offsets for Wayland-native surfaces;
+worth revisiting once screenshot capability (Phase 4) makes visual
+comparison easy, or when the Shell extension (Phase 3) can provide an
+independent geometry source to cross-check against). See AGENTS.md's
+matching gotcha.
 
 ## AT-SPI2 element correlation
 
@@ -168,9 +212,11 @@ never `/mnt/c/...`.
 ## Build plan / phases
 
 See the plan this repo was scaffolded from for the full phase breakdown
-(environment verification, AT-SPI + X11 core, input synthesis, the GNOME
-Shell extension + Wayland window management, Wayland screenshot/OCR/displays,
-feedback + activity log GUI, tests/docs/contract sync). Phases are sequenced
+(environment verification, **AT-SPI + X11 core (done, Phase 1)**, **input
+synthesis (done, Phase 2 — click/move/scroll/key/type, `permissions.status`)**,
+the GNOME Shell extension + Wayland window management, Wayland
+screenshot/OCR/displays, feedback + activity log GUI, tests/docs/contract
+sync). Phases are sequenced
 so as much as possible lands and gets live-tested inside a WSL Ubuntu 26.04
 session before anything requires a real GNOME/Mutter desktop — window
 enumeration/activation on Wayland, the Shell extension, portal consent
