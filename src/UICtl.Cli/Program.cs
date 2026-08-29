@@ -24,9 +24,11 @@ root.Add(InputCommands.Click());
 root.Add(InputCommands.Move());
 root.Add(InputCommands.Scroll());
 root.Add(InputCommands.Key());
+root.Add(WindowCommands.Activate());
+root.Add(WindowCommands.Focus());
 
-// More subcommands land here phase by phase (displays/activate, focus,
-// screenshot, wait-for/ocr/pixel, clipboard, feedback, log, mcp) - see
+// More subcommands land here phase by phase (displays, screenshot,
+// wait-for/ocr/pixel, clipboard, feedback, log, mcp) - see
 // ENGINEERING.md's build plan.
 
 return await root.Parse(args).InvokeAsync();
