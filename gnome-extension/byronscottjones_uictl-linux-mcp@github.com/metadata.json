@@ -1,0 +1,7 @@
+{
+  "uuid": "byronscottjones_uictl-linux-mcp@github.com",
+  "name": "uictl Window Manager",
+  "description": "Exposes org.byronscottjones.uictl.WindowManager over D-Bus so uictl (github.com/ByronScottJones/uictl-linux-mcp) can list/activate windows on Wayland, where Mutter deliberately gives an outside process no other way to do this. Not a user-facing extension - no UI, no preferences.",
+  "shell-version": ["50"],
+  "version-name": "1"
+}
