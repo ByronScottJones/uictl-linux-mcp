@@ -8,7 +8,13 @@ public static class AppSelector
         foreach (int pid in ProcEnumeration.ListPids())
         {
             string name = ProcEnumeration.TryGetProcessName(pid);
-            if (name.Length > 0 && name.Contains(selector, StringComparison.OrdinalIgnoreCase))
+            // /proc/[pid]/comm truncates to 15 chars (TASK_COMM_LEN), so a
+            // selector longer than that (e.g. "gnome-text-editor" vs the
+            // truncated "gnome-text-edit") would never match via
+            // name.Contains(selector) alone - check both directions.
+            if (name.Length > 0 &&
+                (name.Contains(selector, StringComparison.OrdinalIgnoreCase) ||
+                 selector.Contains(name, StringComparison.OrdinalIgnoreCase)))
                 return pid;
         }
 
