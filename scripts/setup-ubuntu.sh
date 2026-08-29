@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # One-time dev-environment setup for uictl-linux-mcp on Ubuntu 26.04 (GNOME).
-# Idempotent — safe to re-run.
+# Idempotent — safe to re-run. Narrated (echoes each step) for a human
+# walking through it the first time. For an idempotent, machine-readable
+# health check (writes ~/.uictl/preflight.json for `uictl permissions` to
+# read) see scripts/preflight.sh — safe to run either or both.
 set -euo pipefail
 
 echo "==> Updating apt package lists"

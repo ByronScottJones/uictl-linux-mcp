@@ -40,6 +40,11 @@ public sealed record ElementWalkOptions(string? RoleFilter = null, string? Title
 /// concepts differ). <c>SessionType</c> is detected from $WAYLAND_DISPLAY/
 /// $DISPLAY, not $XDG_SESSION_TYPE (observed unset in a real session during
 /// development). <c>ShellExtensionConnected</c> is null on an X11 session.
+/// <c>PreflightReady</c>/<c>PreflightAt</c>/<c>PreflightManualSteps</c>
+/// mirror scripts/preflight.sh's own <c>ready</c>/<c>ranAt</c>/
+/// <c>manualStepsRemaining</c> fields (see Permissions.cs) - lets a caller
+/// tell "preflight never run" apart from "ran, but something's still not
+/// ready" without re-deriving every individual check itself.
 /// </summary>
 public sealed record PermissionsStatus(
     string SessionType,
@@ -47,7 +52,10 @@ public sealed record PermissionsStatus(
     bool UinputWritable,
     bool AtspiEnabled,
     bool? ShellExtensionConnected,
-    bool Interactive);
+    bool Interactive,
+    bool PreflightReady,
+    string? PreflightAt,
+    IReadOnlyList<string> PreflightManualSteps);
 
 public readonly record struct PixelColor(byte R, byte G, byte B, byte A);
 

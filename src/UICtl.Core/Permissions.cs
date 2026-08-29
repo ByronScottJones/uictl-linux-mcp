@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace UICtl.Core;
 
 /// <summary>
@@ -8,6 +10,14 @@ namespace UICtl.Core;
 /// </summary>
 public static class Permissions
 {
+    /// <summary>
+    /// Written by scripts/preflight.sh - deliberately outside UICtl.Ipc's
+    /// DaemonPaths (Core has no reference to Ipc), same "~/.uictl" base
+    /// directory convention.
+    /// </summary>
+    private static readonly string PreflightPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".uictl", "preflight.json");
+
     public static PermissionsStatus GetStatus()
     {
         // Detected from $WAYLAND_DISPLAY/$DISPLAY, not $XDG_SESSION_TYPE -
@@ -27,13 +37,18 @@ public static class Permissions
 
         bool interactive = (hasWayland || hasX11) && Tmds.DBus.Address.Session is not null;
 
+        var preflight = ReadPreflightStatus();
+
         return new PermissionsStatus(
             SessionType: sessionType,
             InputMethod: "uinput",
             UinputWritable: uinputWritable,
             AtspiEnabled: atspiEnabled,
             ShellExtensionConnected: shellExtensionConnected,
-            Interactive: interactive);
+            Interactive: interactive,
+            PreflightReady: preflight.Ready,
+            PreflightAt: preflight.At,
+            PreflightManualSteps: preflight.ManualSteps);
     }
 
     private static bool TryProbeAtspi()
@@ -46,6 +61,38 @@ public static class Permissions
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Never seen scripts/preflight.sh run -&gt; (false, null, []). Ran but
+    /// not fully ready -&gt; (false, &lt;timestamp&gt;, &lt;steps&gt;), so a
+    /// caller can tell "never run" apart from "ran, but something's still
+    /// not ready" - and what to actually do about it. A malformed file
+    /// (partial write, hand-edited) is treated the same as "never run"
+    /// rather than throwing - this is a status hint, not something that
+    /// should fail the whole permissions call.
+    /// </summary>
+    private static (bool Ready, string? At, IReadOnlyList<string> ManualSteps) ReadPreflightStatus()
+    {
+        if (!File.Exists(PreflightPath)) return (false, null, Array.Empty<string>());
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(PreflightPath));
+            var root = doc.RootElement;
+            bool ready = root.TryGetProperty("ready", out var readyProp) && readyProp.GetBoolean();
+            string? at = root.TryGetProperty("ranAt", out var atProp) ? atProp.GetString() : null;
+
+            var steps = new List<string>();
+            if (root.TryGetProperty("manualStepsRemaining", out var stepsProp) && stepsProp.ValueKind == JsonValueKind.Array)
+                foreach (var step in stepsProp.EnumerateArray())
+                    if (step.GetString() is { } s) steps.Add(s);
+
+            return (ready, at, steps);
+        }
+        catch
+        {
+            return (false, null, Array.Empty<string>());
         }
     }
 }

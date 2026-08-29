@@ -136,6 +136,10 @@ implement an ATK/AT-SPI bridge properly) don't expose useful nodes via
   `/dev/uinput` shipped `root:root` mode `0600` with no group grant at all,
   so `usermod -aG input` alone left `uictl permissions`' `uinputWritable`
   false. Check that field before assuming click/type/scroll/key will work.
+  `scripts/preflight.sh` runs (and re-runs) every setup check at once and
+  records the result at `~/.uictl/preflight.json` — `uictl permissions`'
+  `preflightReady`/`preflightAt`/`preflightManualSteps` fields surface that
+  same status without you having to re-derive it check by check.
 - **`elements`' `value` field is not always populated even when `type`
   worked.** It's read from AT-SPI's `Text` interface, but some widgets'
   outer accessible (e.g. GtkSourceView's `text box` role in GNOME Text
