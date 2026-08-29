@@ -10,11 +10,11 @@ namespace UICtl.Ipc;
 /// params into typed Core calls, then shape the result into exactly the JSON
 /// MCP_INTERFACE.md documents for that tool.
 ///
-/// Currently a stub with no real cases - Core has no AT-SPI/X11/Wayland
-/// implementations yet (Phase 1+). This exists now so the daemon/IPC/socket
-/// round trip can be proven end-to-end before any platform capability is
-/// built on top of it. ActivityLog/UICtlGate gating (both empty daemon calls
-/// forward through unconditionally today) arrives in Phase 5, same as
+/// Phase 1 so far: apps.list/windows.list/elements/type, all AT-SPI-based
+/// (see Accessibility.cs). Everything else (activate/focus/screenshot/
+/// click/move/scroll/key/ocr/pixel/clipboard, feedback, log) still throws
+/// "not implemented yet" - later phases. ActivityLog/UICtlGate gating (both
+/// still forward through unconditionally) arrives in Phase 5, same as
 /// macOS/Windows.
 /// </summary>
 public static class CommandDispatcher
@@ -42,6 +42,49 @@ public static class CommandDispatcher
     private static object Execute(string command, JsonElement p) => command switch
     {
         "__ping__" => new Dictionary<string, object?> { ["pong"] = true },
+
+        "apps.list" => new Dictionary<string, object?> { ["apps"] = Accessibility.ListApps(p.GetBoolOrDefault("all")) },
+        "windows.list" => WindowsList(p),
+        "elements" => Elements(p),
+        "type" => TypeText(p),
+
         _ => throw new UiCtlException($"not implemented yet: {command}"),
     };
+
+    private static object WindowsList(JsonElement p)
+    {
+        int? pidFilter = p.GetStringOrNull("app") is { } app ? AppSelector.Resolve(app) : null;
+        return new Dictionary<string, object?> { ["windows"] = Accessibility.ListWindows(pidFilter) };
+    }
+
+    private static object Elements(JsonElement p)
+    {
+        var resolved = WindowResolver.Resolve(p.GetLongOrNull("window"), p.GetStringOrNull("app"));
+        var options = new ElementWalkOptions(
+            RoleFilter: p.GetStringOrNull("role"),
+            TitleContains: p.GetStringOrNull("title"),
+            MaxDepth: p.GetIntOrNull("maxDepth") ?? 25,
+            MaxElements: p.GetIntOrNull("maxElements") ?? 500);
+        var walk = Accessibility.WalkWindow(resolved.WindowId, options);
+
+        var data = new Dictionary<string, object?>
+        {
+            ["windowId"] = resolved.WindowId,
+            ["count"] = walk.Elements.Count,
+            ["elements"] = walk.Elements,
+        };
+        if (walk.Truncated) data["truncated"] = true;
+        return data;
+    }
+
+    private static object TypeText(JsonElement p)
+    {
+        string text = p.GetStringOrThrow("text");
+        string? elementId = p.GetStringOrNull("element");
+        if (elementId is null)
+            throw new UiCtlException("typing into whatever has focus (no --element) needs synthesized keystrokes, not implemented yet - see ENGINEERING.md's build plan");
+
+        string method = Accessibility.SetElementText(elementId, text);
+        return new Dictionary<string, object?> { ["method"] = method, ["element"] = elementId };
+    }
 }
