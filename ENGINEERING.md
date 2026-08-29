@@ -59,7 +59,7 @@ connections to AT-SPI's registry and the Shell extension.
 | Accessibility (elements/click/type) | **AT-SPI2 over D-Bus** (`org.a11y.Bus` registry; `Accessible`/`Component`/`Action`/`Text`/`EditableText` interfaces) via `Tmds.DBus`. Works identically under X11 and Wayland — build this first, it's most of the value. Confirmed live against a real GNOME desktop: `Component.GetExtents` returns real screen-coordinate geometry for a Wayland-native app's top-level window (`gnome-text-editor`'s Frame accessible: role `window`, `Name` = title, `GetExtents(0)` = real `(x,y,w,h)`) — this is enough to build most of `windows.list` (title/frame/role) and all of `elements`/`click`/`type` **without X11 or the Shell extension**, for any app that registers with AT-SPI. `Component.GrabFocus` looked like a possible general activation mechanism but returns `NotSupported` in practice (tested against the same Frame) — window *activation* still needs X11 or the Shell extension, see below. `apps.list`'s pid can be cross-referenced against AT-SPI's `Accessible.GetApplication`. |
 | apps.list | `/proc/[pid]/comm` + `/proc/[pid]/cmdline` enumeration — no permission needed, same on X11/Wayland. |
 | windows.list | Primarily AT-SPI (see above) for any app that registers — title, frame, role. Fall back to the `IWindowBackend` split below only to catch windows AT-SPI doesn't know about (an app that doesn't implement the AT-SPI/ATK bridge) or to fill in `displayId`/pid-to-window correlation gaps. |
-| activate / focus | AT-SPI has no general activation primitive (`GrabFocus` unsupported in practice) — this is the one area still fully gated on `IWindowBackend`, chosen at runtime by session-type detection. Note: this environment's `$XDG_SESSION_TYPE` was observed **unset** even with `$WAYLAND_DISPLAY` and `$DISPLAY` both present (both WSLg and the real GNOME VM) — detect by checking `$WAYLAND_DISPLAY` first, `$DISPLAY` second, don't rely on `$XDG_SESSION_TYPE` alone. **X11 backend**: direct Xlib P/Invoke against EWMH (`_NET_ACTIVE_WINDOW`, plus `_NET_WM_PID`/`_NET_WM_NAME` where available) — same "raw P/Invoke to the native platform lib" pattern as `NativeMethods.cs` on Windows; note EWMH support can be partial (WSLg's XWayland advertises no `_NET_CLIENT_LIST` at all in `_NET_SUPPORTED`), and **most modern GTK apps run as native Wayland clients even on a real GNOME/Xorg-available desktop** (confirmed: default-launched `gnome-text-editor` is invisible to `xwininfo -root -tree` entirely, X11-only helper windows aside) — so treat the X11 backend as covering genuinely X11-native/forced (`GDK_BACKEND=x11`) apps and Xorg sessions specifically, not the common case. **Wayland/GNOME backend**: D-Bus calls to the companion Shell extension (`gnome-extension/`), since Mutter deliberately exposes no such API to arbitrary outside processes — this is the backend that actually matters for activating a typical modern GNOME app. |
+| activate / focus | **Implemented** (Phase 3: `IWindowBackend.cs`/`WindowActivation.cs`/`FocusHoldStore.cs`). AT-SPI has no general activation primitive (`GrabFocus` unsupported in practice) — this is the one area gated on `IWindowBackend`, chosen at runtime by `SessionDetection` (`$WAYLAND_DISPLAY` first, `$DISPLAY` second — `$XDG_SESSION_TYPE` observed unset in this environment, don't rely on it alone). **X11 backend** (`X11WindowBackend.cs`): direct Xlib P/Invoke against EWMH (`_NET_CLIENT_LIST`/`_NET_WM_PID`/`_NET_WM_NAME`/`_NET_ACTIVE_WINDOW`) — live-verified against a `GDK_BACKEND=x11`-forced app on this Wayland machine's XWayland (the best available approximation without a genuine X11 session; a daemon spawned with `$WAYLAND_DISPLAY` unset correctly falls back to this backend). One real Xlib gotcha, easy to get wrong: `XGetWindowProperty` returns a format-32 property (Window/CARDINAL values) as an array of native `long` (8 bytes on x86_64), not 4-byte `int32`, regardless of the logical 32-bit value it holds. **Wayland/GNOME backend** (`WaylandWindowBackend.cs`): D-Bus calls to the companion Shell extension (`gnome-extension/`, see below) — the backend that matters for a typical modern GNOME app, since most GTK apps run as native Wayland clients even on a real GNOME/Xorg-available desktop (confirmed in Phase 1: default-launched `gnome-text-editor` invisible to X11 entirely). `windows.list` stays 100% AT-SPI-based, unchanged — `IWindowBackend` is used *only* for activation, correlated to AT-SPI's own windowId scheme by pid (see `MCP_INTERFACE.md`'s "Window id" section for why these are deliberately separate id spaces). |
 | displays.list | X11: RandR extension. Wayland/GNOME: `org.gnome.Mutter.DisplayConfig` D-Bus interface — exposed by Mutter itself for `gnome-control-center`, **no custom extension needed** for this one. |
 | screenshot | X11: `XGetImage`/`XShmGetImage`, no permission prompt. Wayland: `org.freedesktop.portal.Screenshot`, or `ScreenCast` + PipeWire for repeat/window-scoped capture — negotiate the portal session once per daemon lifetime and reuse it rather than popping a dialog every call, the closest Linux analog to macOS's one-time Screen Recording grant. |
 | input synthesis | **Implemented** (Phase 2): `/dev/uinput` virtual keyboard+mouse device via P/Invoke `ioctl`/`write` — kernel-level, identical under X11 and Wayland (no `IWindowBackend` split needed, unlike windowing), no per-call dialog. One long-lived absolute-pointer+keyboard device, created once and cached for the daemon's lifetime (`UinputDevice.cs`), ranged to the real X11/XWayland screen pixel size (`Interop/XlibScreenInterop.cs`) rather than a normalized virtual range — see "Coordinate spaces" below. Needs one-time device-permission setup: group membership alone is **not** sufficient on a stock Ubuntu 26.04 install (confirmed live: `/dev/uinput` ships `root:root` mode `0600` with no group grant at all) — a udev rule is also required, see README's Input setup section. Text/key synthesis is US-QWERTY/ASCII-only (`KeyCodes.cs` — `uinput` codes are physical-key codes, not Unicode input); an unsupported character throws rather than silently dropping. XTest remains a documented, not-yet-built zero-setup alternative for a confirmed-X11 session. |
@@ -159,21 +159,49 @@ applications by PID — verify this holds in practice during Phase 1 rather
 than assuming, and document a fallback heuristic here if it doesn't (mirror
 macOS's Calculator-exception writeup as the template for how to record it).
 
-## GNOME Shell extension
+## GNOME Shell extension (Phase 3 — implemented)
 
-A small GJS extension (`gnome-extension/`), its own D-Bus name (e.g.
-`org.uictl.WindowManager` on the session bus), exposing `ListWindows()`,
-`GetWindowGeometry(id)`, `ActivateWindow(id)`, `GetFocusedWindow()` —
-wrapping Mutter's internal `global.display`/`Meta.Window` APIs the way
-community extensions like "Window Calls" do. Versioned/tested against
-whatever GNOME release ships with Ubuntu 26.04 specifically — a Shell
-major-version bump breaking it is a known, accepted fragility, not something
-this project tries to abstract away (same spirit as `uictl-win-mcp` being
-scoped to its dev machine's exact OS build). Requires `gnome-extensions
-install`/`enable` plus a Wayland re-login (Shell can't restart live under
-Wayland the way it could under X11) — documented as a one-time setup step in
-the README, the Linux analog of granting Accessibility/Screen Recording on
-macOS.
+`gnome-extension/byronscottjones_uictl-linux-mcp@github.com/` — a small GJS
+extension exposing `org.byronscottjones.uictl.WindowManager` on the session
+bus (`ListWindows()`, `ActivateWindow(stableSeq)`, `GetFocusedWindow()` —
+no separate `GetWindowGeometry`, `ListWindows()` already returns full
+geometry per window, cheap in-process GObject calls with no reason to
+split it out). Wraps Mutter's `global.display`/`Meta.Window` APIs the same
+way community extensions do. **Design grounded in real, currently-running
+extensions found on this exact GNOME Shell 50 install**
+(`/usr/share/gnome-shell/extensions/`), not guessed from training
+knowledge: `snapd-prompting@canonical.com/dbusServer.js` for the
+`Gio.DBusExportedObject.wrapJSObject` + `own_name` D-Bus-export pattern;
+`ding@rastersoft.com`/`tiling-assistant@ubuntu.com`/`ubuntu-dock@ubuntu.com`
+confirmed live: `global.display.list_all_windows()`,
+`window.get_stable_sequence()` (the Wayland-backend windowId, see
+`MCP_INTERFACE.md`'s "Window id" section), `window.get_pid()`,
+`window.get_title()`, `window.get_frame_rect()`,
+`global.display.get_focus_window()`, `Main.activateWindow(window)`, and
+the `window.get_window_type() !== Meta.WindowType.DESKTOP &&
+!window.is_skip_taskbar()` filter real dock/tiling extensions use.
+
+Versioned/tested against whatever GNOME release ships with Ubuntu 26.04
+specifically (`shell-version: ["50"]`) — a Shell major-version bump
+breaking it is a known, accepted fragility, not something this project
+tries to abstract away (same spirit as `uictl-win-mcp` being scoped to its
+dev machine's exact OS build).
+
+**Two things confirmed live, not assumed** (see `gnome-extension/README.md`
+for the full detail): (1) `gnome-extensions pack` silently drops any
+source file other than `extension.js` unless named via
+`--extra-source=<file>` — a fresh install with the flag omitted "enables"
+with no error while doing nothing, since the actual D-Bus server code
+never made it into the package. (2) A **brand-new** extension genuinely
+needs a full Shell restart (logout/login, or reboot — Wayland has no live
+`Alt+F2, r`) before Shell is even aware it exists at all —
+`gnome-extensions list`/`info` report nothing for it immediately after a
+successful `install`, and `org.gnome.Shell.Extensions.ReloadExtension` is
+introspectable but returns `UnknownMethod` when called (not implemented on
+this build). This confirms (doesn't overturn) the original assumption
+below. **Toggling an already-known extension *is* live**, though — no
+relogin needed after the first time, `gnome-extensions disable`/`enable`
+picks up code changes immediately.
 
 ## Adding a new capability
 
@@ -229,15 +257,15 @@ never `/mnt/c/...`.
 See the plan this repo was scaffolded from for the full phase breakdown
 (environment verification, **AT-SPI + X11 core (done, Phase 1)**, **input
 synthesis (done, Phase 2 — click/move/scroll/key/type, `permissions.status`)**,
-the GNOME Shell extension + Wayland window management, Wayland
+**the GNOME Shell extension + Wayland window management (done, Phase 3 —
+activate/focus.hold/focus.release/focus.status)**, Wayland
 screenshot/OCR/displays, feedback + activity log GUI, tests/docs/contract
-sync). Phases are sequenced
-so as much as possible lands and gets live-tested inside a WSL Ubuntu 26.04
-session before anything requires a real GNOME/Mutter desktop — window
-enumeration/activation on Wayland, the Shell extension, portal consent
-dialogs, and `Mutter.DisplayConfig` cannot be meaningfully exercised in
-WSLg (it runs a lightweight `weston` compositor, not `gnome-shell`/Mutter)
-and need a real GNOME desktop session (a VM is sufficient).
+sync). Development runs directly against a real GNOME/Mutter desktop
+session (not WSL/WSLg, which only runs a lightweight `weston` compositor —
+window enumeration/activation on Wayland, the Shell extension, portal
+consent dialogs, and `Mutter.DisplayConfig` genuinely need real
+`gnome-shell`/Mutter, confirmed hands-on building Phase 3), so every phase
+lands and gets live-tested against the genuine article, not approximated.
 
 **Live-test every phase against a real running GTK app, not just a clean
 build** — this is the standing lesson from `uictl-win-mcp`, where code
