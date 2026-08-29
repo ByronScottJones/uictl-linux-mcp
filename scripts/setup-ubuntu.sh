@@ -43,6 +43,19 @@ else
   echo "    added — you must log out and back in (a fresh session) for this to take effect"
 fi
 
+echo "==> Granting the 'input' group write access to /dev/uinput via udev"
+# Group membership alone is not sufficient on a stock Ubuntu 26.04 install -
+# confirmed live during development: /dev/uinput ships root:root mode 0600
+# with no group grant at all. Without this rule, 'uictl permissions' keeps
+# reporting uinputWritable: false even after the usermod step above.
+if [ -f /etc/udev/rules.d/99-uinput.rules ]; then
+  echo "    udev rule already present"
+else
+  echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-uinput.rules >/dev/null
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger --name-match=/dev/uinput || echo "    (trigger didn't pick it up live - a reboot will apply it)"
+fi
+
 echo
 echo "==> Done. Verify with:"
 echo "    dotnet --version"
