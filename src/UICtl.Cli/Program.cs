@@ -18,7 +18,10 @@ root.Add(DaemonCommands.Daemon());
 root.Add(QueryCommands.Apps());
 root.Add(QueryCommands.Permissions());
 root.Add(QueryCommands.Windows());
+root.Add(QueryCommands.Displays());
 root.Add(CaptureCommands.Elements());
+root.Add(CaptureCommands.Screenshot());
+root.Add(CaptureCommands.Pixel());
 root.Add(InputCommands.Type());
 root.Add(InputCommands.Click());
 root.Add(InputCommands.Move());
@@ -27,8 +30,7 @@ root.Add(InputCommands.Key());
 root.Add(WindowCommands.Activate());
 root.Add(WindowCommands.Focus());
 
-// More subcommands land here phase by phase (displays, screenshot,
-// wait-for/ocr/pixel, clipboard, feedback, log, mcp) - see
-// ENGINEERING.md's build plan.
+// More subcommands land here phase by phase (wait-for/ocr, clipboard,
+// feedback, log, mcp) - see ENGINEERING.md's build plan.
 
 return await root.Parse(args).InvokeAsync();

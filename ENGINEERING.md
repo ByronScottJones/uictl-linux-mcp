@@ -60,10 +60,11 @@ connections to AT-SPI's registry and the Shell extension.
 | apps.list | `/proc/[pid]/comm` + `/proc/[pid]/cmdline` enumeration — no permission needed, same on X11/Wayland. |
 | windows.list | Primarily AT-SPI (see above) for any app that registers — title, frame, role. Fall back to the `IWindowBackend` split below only to catch windows AT-SPI doesn't know about (an app that doesn't implement the AT-SPI/ATK bridge) or to fill in `displayId`/pid-to-window correlation gaps. |
 | activate / focus | **Implemented** (Phase 3: `IWindowBackend.cs`/`WindowActivation.cs`/`FocusHoldStore.cs`). AT-SPI has no general activation primitive (`GrabFocus` unsupported in practice) — this is the one area gated on `IWindowBackend`, chosen at runtime by `SessionDetection` (`$WAYLAND_DISPLAY` first, `$DISPLAY` second — `$XDG_SESSION_TYPE` observed unset in this environment, don't rely on it alone). **X11 backend** (`X11WindowBackend.cs`): direct Xlib P/Invoke against EWMH (`_NET_CLIENT_LIST`/`_NET_WM_PID`/`_NET_WM_NAME`/`_NET_ACTIVE_WINDOW`) — live-verified against a `GDK_BACKEND=x11`-forced app on this Wayland machine's XWayland (the best available approximation without a genuine X11 session; a daemon spawned with `$WAYLAND_DISPLAY` unset correctly falls back to this backend). One real Xlib gotcha, easy to get wrong: `XGetWindowProperty` returns a format-32 property (Window/CARDINAL values) as an array of native `long` (8 bytes on x86_64), not 4-byte `int32`, regardless of the logical 32-bit value it holds. **Wayland/GNOME backend** (`WaylandWindowBackend.cs`): D-Bus calls to the companion Shell extension (`gnome-extension/`, see below) — the backend that matters for a typical modern GNOME app, since most GTK apps run as native Wayland clients even on a real GNOME/Xorg-available desktop (confirmed in Phase 1: default-launched `gnome-text-editor` invisible to X11 entirely). `windows.list` stays 100% AT-SPI-based, unchanged — `IWindowBackend` is used *only* for activation, correlated to AT-SPI's own windowId scheme by pid (see `MCP_INTERFACE.md`'s "Window id" section for why these are deliberately separate id spaces). |
-| displays.list | X11: RandR extension. Wayland/GNOME: `org.gnome.Mutter.DisplayConfig` D-Bus interface — exposed by Mutter itself for `gnome-control-center`, **no custom extension needed** for this one. |
-| screenshot | X11: `XGetImage`/`XShmGetImage`, no permission prompt. Wayland: `org.freedesktop.portal.Screenshot`, or `ScreenCast` + PipeWire for repeat/window-scoped capture — negotiate the portal session once per daemon lifetime and reuse it rather than popping a dialog every call, the closest Linux analog to macOS's one-time Screen Recording grant. |
+| displays.list | **Implemented** (Phase 4: `DisplayConfig.cs`). Not X11-RandR-vs-Wayland-split as originally planned below — `org.gnome.Mutter.DisplayConfig` turned out to answer for **both** session types (Mutter is the compositor/WM either way, exposing this for `gnome-control-center`'s own display panel regardless of X11/Wayland), so one D-Bus code path covers both, no XRandR P/Invoke needed. `logicalMonitors`' x/y/scale is Mutter's own global "logical" coordinate space — width/height aren't given directly, derived from the matching physical monitor's current mode divided by that scale. `displayId` is an opaque hash of Mutter's connector-name string (e.g. "Virtual-1") — Mutter's API has no raw XID-equivalent even on an X11 session, unlike RandR's RROutput. |
+| screenshot | **Implemented** (Phase 4: `Screenshot.cs`/`X11ScreenCapture.cs`/`WaylandScreenshotBackend.cs`). X11: `XGetImage` (32bpp TrueColor only — confirmed universal on this class of machine, throws naming the bpp otherwise), no permission prompt, live-verified against a `GDK_BACKEND=x11`-forced window. Wayland: `org.freedesktop.portal.Screenshot` — see "Wayland screenshot" section below for what this actually took to get working and its real, unresolved limitation (a consent dialog on **every** call, not just the first). PNG encode/decode is hand-rolled (`Interop/PngCodec.cs`) rather than a new dependency — see its own doc comment. |
+| pixel | **Implemented** (Phase 4: `Pixel.cs`). X11: `XGetImage` of a 1x1 region via the same code screenshot uses. Wayland: samples a full portal screenshot — see MCP_INTERFACE.md, this is genuinely expensive here (full capture + consent dialog per call), not a cheap primitive. |
 | input synthesis | **Implemented** (Phase 2): `/dev/uinput` virtual keyboard+mouse device via P/Invoke `ioctl`/`write` — kernel-level, identical under X11 and Wayland (no `IWindowBackend` split needed, unlike windowing), no per-call dialog. One long-lived absolute-pointer+keyboard device, created once and cached for the daemon's lifetime (`UinputDevice.cs`), ranged to the real X11/XWayland screen pixel size (`Interop/XlibScreenInterop.cs`) rather than a normalized virtual range — see "Coordinate spaces" below. Needs one-time device-permission setup: group membership alone is **not** sufficient on a stock Ubuntu 26.04 install (confirmed live: `/dev/uinput` ships `root:root` mode `0600` with no group grant at all) — a udev rule is also required, see README's Input setup section. Text/key synthesis is US-QWERTY/ASCII-only (`KeyCodes.cs` — `uinput` codes are physical-key codes, not Unicode input); an unsupported character throws rather than silently dropping. XTest remains a documented, not-yet-built zero-setup alternative for a confirmed-X11 session. |
-| OCR | **Tesseract** via the `Tesseract` NuGet (libtesseract P/Invoke wrapper), fully local, no network. Reports real per-word confidence — unlike Windows' `null`, closer to macOS's Vision output. |
+| OCR | Design only, not yet implemented (Phase 4's `screenshot`/`displays.list`/`pixel` landed first — see the build plan below). **Tesseract** via the `Tesseract` NuGet (libtesseract P/Invoke wrapper) — package reference already added, `tesseract-ocr`/`tesseract-ocr-eng` already in `scripts/preflight.sh`. Fully local, no network. Reports real per-word confidence — unlike Windows' `null`, closer to macOS's Vision output. |
 | pixel | X11: 1×1 `XGetImage`. Wayland: sampled from the same screenshot/screencast frame — no cheap standalone primitive exists here, so this is genuinely more expensive than macOS/Windows on Wayland. |
 | clipboard | Shell out to `wl-copy`/`wl-paste` (Wayland) or `xclip` (X11), selected by the same session-type detection as windows. Native-protocol implementation is a possible follow-up if shelling out proves fragile. |
 | permissions.status | **Implemented** (Phase 2, `Permissions.cs`): `{"sessionType": "x11"|"wayland", "inputMethod": "uinput"|"xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool \| null, "interactive": bool}`. `inputMethod` always reports `"uinput"` for now (XTest isn't built, so there's nothing to choose between yet). `shellExtensionConnected` is always `false` on Wayland until the companion extension exists (Phase 3). |
@@ -158,6 +159,53 @@ the app's PID (from `_NET_WM_PID`) plus AT-SPI's own registry of
 applications by PID — verify this holds in practice during Phase 1 rather
 than assuming, and document a fallback heuristic here if it doesn't (mirror
 macOS's Calculator-exception writeup as the template for how to record it).
+
+## Wayland screenshot (Phase 4 — implemented, with a real open limitation)
+
+`org.freedesktop.portal.Screenshot`, live-debugged against this machine's
+real `xdg-desktop-portal`/`xdg-desktop-portal-gnome` (including a
+temporary `G_MESSAGES_DEBUG=all` restart of both to see past a bare,
+undetailed `Request.Response` error code) rather than assumed from the
+spec. Two non-obvious, load-bearing findings from that session, both now
+baked into `WaylandScreenshotBackend.cs`:
+
+1. **A "host" (non-Flatpak/Snap) D-Bus client needs an app identity before
+   Screenshot will do anything at all.** `org.freedesktop.host.portal.Registry.Register(app_id, {})`
+   must be called first, and it fails with `"App info not found for '<id>'"`
+   unless a `.desktop` file named `<app_id>.desktop` exists under
+   `$XDG_DATA_HOME/applications`. This project has no fixed install
+   location for the `uictl` binary (see README.md's Build section), so
+   `WaylandScreenshotBackend.EnsureDesktopFileInstalled` self-writes/repairs
+   this file from `Environment.ProcessPath` on every daemon startup rather
+   than assuming one.
+2. **There is no working zero-dialog path through this interface.**
+   `{"interactive": false}` (documented elsewhere as "reuse a previously
+   granted permission, fail if none exists") fails immediately
+   (`Request.Response` code 2) every time in this GNOME build — nothing
+   observed grants that stored permission via this interface, for a host
+   app at least. Only `{"interactive": true}` completes successfully, but
+   it shows a real modal "Take Screenshot" dialog needing a manual click —
+   **confirmed live, repeatedly, that this happens on every call**, not
+   just a first-time grant (one anomalous pair of instant, dialog-free
+   calls was observed once during testing and never reproduced again
+   across several follow-up attempts — most likely a leftover
+   request/dialog from a rapid daemon-restart testing sequence, not a real
+   silent-repeat path; treat "every call needs a click" as the behavior to
+   design and document against).
+
+**Deliberately deferred, not attempted this pass:** `org.freedesktop.portal.ScreenCast`
++ PipeWire is the actual "one-time consent, then silent repeat capture"
+mechanism GNOME apps use (a `restore_token` skips the picker on later
+session creation) — this is the real fix for the per-call dialog above,
+matching macOS's one-time Screen Recording grant the way the original
+plan for this row intended. Not built here: it needs a live PipeWire
+stream negotiation (SPA format/buffer negotiation, frame pulling) via
+P/Invoke against `libpipewire` — no .NET binding exists for this, and
+it's a substantially larger and riskier body of work than the rest of
+Phase 4. Revisit as its own follow-up phase once screenshot's current
+click-per-call behavior is confirmed to actually be a problem in
+practice (it may be fine for supervised/manual use and only matter for
+tight unattended automation loops).
 
 ## GNOME Shell extension (Phase 3 — implemented)
 
@@ -258,9 +306,11 @@ See the plan this repo was scaffolded from for the full phase breakdown
 (environment verification, **AT-SPI + X11 core (done, Phase 1)**, **input
 synthesis (done, Phase 2 — click/move/scroll/key/type, `permissions.status`)**,
 **the GNOME Shell extension + Wayland window management (done, Phase 3 —
-activate/focus.hold/focus.release/focus.status)**, Wayland
-screenshot/OCR/displays, feedback + activity log GUI, tests/docs/contract
-sync). Development runs directly against a real GNOME/Mutter desktop
+activate/focus.hold/focus.release/focus.status)**, **Wayland
+screenshot/displays/pixel (mostly done, Phase 4 — screenshot/displays.list/pixel
+implemented and live-verified; OCR and ScreenCast+PipeWire not yet — see
+"Wayland screenshot" section above)**, feedback + activity log GUI,
+tests/docs/contract sync). Development runs directly against a real GNOME/Mutter desktop
 session (not WSL/WSLg, which only runs a lightweight `weston` compositor —
 window enumeration/activation on Wayland, the Shell extension, portal
 consent dialogs, and `Mutter.DisplayConfig` genuinely need real

@@ -143,7 +143,7 @@ uictl displays                               # list monitors + scale
 uictl windows --app gedit                    # list an app's windows
 uictl activate --app gedit                   # bring it to front
 uictl focus hold --app gedit                 # pin focus for a sequence of actions
-uictl screenshot --app gedit --annotate      # numbered element overlay + legend
+uictl screenshot --app gedit --annotate --out /tmp/shot.png  # numbered element overlay + legend
 uictl elements --app gedit --role push-button
 uictl click --element 12345-7                # click element 7 from that legend
 uictl type --element 12345-9 "hello"         # type into a specific field

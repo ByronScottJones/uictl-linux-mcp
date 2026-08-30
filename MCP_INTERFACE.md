@@ -241,6 +241,24 @@ since the underlying concepts differ:
 `role` is a platform-native string — on Linux, an AT-SPI role name (see
 `uictl_elements` below).
 
+- Linux, X11 backend: instant, no permission prompt (`XGetImage`).
+- Linux, Wayland backend: **every single call shows a real modal consent
+  dialog requiring a manual click** (`org.freedesktop.portal.Screenshot`
+  with `interactive: true` — the only variant confirmed to actually work,
+  live-tested repeatedly; see `ENGINEERING.md`'s "Wayland screenshot"
+  section for what was tried and ruled out). Not a one-time grant like
+  macOS's Screen Recording permission — this is a real, currently
+  unresolved divergence from the other two platforms, not yet fixed by
+  the ScreenCast+PipeWire path `ENGINEERING.md` documents as the likely
+  real fix. Don't call this in an unattended loop on a Wayland session.
+- Linux: `--annotate` requires `--app`/`--window` (elements are walked
+  from one resolved window, there is no "walk the whole desktop"
+  primitive) — throws if neither is given. Inherits the same nested-element
+  frame degeneracy `uictl_elements`/`uictl_click` have on this platform
+  (see `ENGINEERING.md`'s "Coordinate spaces" section) - a numbered box
+  lands correctly for large/top-anchored elements, not for small
+  precisely-positioned ones.
+
 ### `uictl_elements`
 
 `data`: `{"windowId": int, "count": int, "elements": [...]}`, plus
@@ -325,8 +343,9 @@ crossing platforms must translate this themselves.
   as macOS/Windows.
 - Linux, Wayland backend: **genuinely more expensive than the other
   platforms** — there is no cheap single-pixel read primitive under
-  Wayland; the value is sampled from a full captured screenshot/screencast
-  frame. Document this in caller-facing docs (`AGENTS.md`) rather than
+  Wayland; the value is sampled from a full captured screenshot (see
+  `uictl_screenshot` above), including that same real per-call consent
+  dialog. Document this in caller-facing docs (`AGENTS.md`) rather than
   quietly making `pixel` slow and unexplained; don't use it in a tight
   polling loop on a Wayland session the way you might on macOS/Windows.
 

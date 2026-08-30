@@ -16,10 +16,11 @@ namespace UICtl.Ipc;
 /// activate/focus.hold/focus.release/focus.status (see WindowActivation.cs/
 /// FocusHoldStore.cs) - click/move/scroll/key/type are wrapped with
 /// WithFocusHold so a held window gets re-activated before every
-/// focus-sensitive action. Everything else (screenshot/ocr/pixel/
-/// clipboard, feedback, log) still throws "not implemented yet" - later
-/// phases. ActivityLog/UICtlGate gating (both still forward through
-/// unconditionally) arrives in Phase 5, same as macOS/Windows.
+/// focus-sensitive action. Phase 4: displays.list/screenshot/pixel (see
+/// DisplayConfig.cs/Screenshot.cs/Pixel.cs) - ocr/clipboard/wait-for are
+/// still "not implemented yet", along with feedback/log. ActivityLog/
+/// UICtlGate gating (both still forward through unconditionally) arrives
+/// in Phase 5, same as macOS/Windows.
 /// </summary>
 public static class CommandDispatcher
 {
@@ -49,6 +50,7 @@ public static class CommandDispatcher
 
         "apps.list" => new Dictionary<string, object?> { ["apps"] = Accessibility.ListApps(p.GetBoolOrDefault("all")) },
         "windows.list" => WindowsList(p),
+        "displays.list" => new Dictionary<string, object?> { ["displays"] = DisplayConfig.List() },
         "elements" => Elements(p),
         "type" => WithFocusHold(() => TypeText(p)),
         "permissions.status" => Permissions.GetStatus(),
@@ -60,6 +62,8 @@ public static class CommandDispatcher
         "focus.hold" => FocusHold(p),
         "focus.release" => FocusHoldStore.Release(),
         "focus.status" => FocusHoldStore.Status(),
+        "screenshot" => CaptureScreenshot(p),
+        "pixel" => Pixel.At(p.GetPointOrThrow("at")),
 
         _ => throw new UiCtlException($"not implemented yet: {command}"),
     };
@@ -164,6 +168,26 @@ public static class CommandDispatcher
         var resolved = WindowResolver.Resolve(p.GetLongOrNull("window"), appSelector);
         string label = appSelector ?? resolved.Pid.ToString();
         return FocusHoldStore.Hold(label, resolved.Pid, resolved.WindowId);
+    }
+
+    private static Dictionary<string, object?> CaptureScreenshot(JsonElement p)
+    {
+        long? windowId = p.GetLongOrNull("window");
+        string? app = p.GetStringOrNull("app");
+        int? screen = p.GetIntOrNull("screen");
+        bool annotate = p.GetBoolOrDefault("annotate");
+        string? role = p.GetStringOrNull("role");
+        string outPath = p.GetStringOrThrow("out");
+
+        var result = Screenshot.Capture(windowId, app, screen, annotate, role, outPath);
+        var data = new Dictionary<string, object?>
+        {
+            ["path"] = result.Path,
+            ["width"] = result.Width,
+            ["height"] = result.Height,
+        };
+        if (result.Elements is not null) data["elements"] = result.Elements;
+        return data;
     }
 
     /// <summary>

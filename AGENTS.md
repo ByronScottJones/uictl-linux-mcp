@@ -153,6 +153,13 @@ implement an ATK/AT-SPI bridge properly) don't expose useful nodes via
   `type` even though the immediately-following `elements` call showed
   `"value": null`. Don't treat a null `value` as proof `type` failed;
   cross-check some other visible effect (title, a re-render, `ocr`) instead.
+- **`screenshot`/`pixel` show a real consent dialog on every call on
+  Wayland.** X11 is instant. On Wayland there is currently no zero-dialog
+  path (`org.freedesktop.portal.Screenshot`'s documented "reuse a stored
+  grant" mode doesn't work here - see `ENGINEERING.md`'s "Wayland
+  screenshot" section) - warn a human before calling either on a Wayland
+  session, the same way you'd warn before synthesizing input, and don't
+  call `pixel` in a polling loop there.
 - **The daemon caches state.** If you rebuild `uictl` during development,
   run `uictl daemon stop` before your next command.
 - **Screenshots/OCR/elements output isn't redacted.** Unlike `type` and
