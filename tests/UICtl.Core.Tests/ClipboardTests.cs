@@ -26,13 +26,19 @@ public class ClipboardTests
         }
         finally
         {
-            if (original is not null) Clipboard.Set(original);
+            // Best-effort restore. There's no "clear"/no-owner primitive in
+            // the public Clipboard API (not part of MCP_INTERFACE.md's
+            // contract), so a clipboard that started empty/non-text is
+            // restored to an empty string rather than left holding this
+            // test's own text - as close to the original state as this
+            // class can produce, not a perfect match.
+            Clipboard.Set(original ?? "");
         }
     }
 
     private static string? TryGetCurrent()
     {
         try { return Clipboard.Get(); }
-        catch (UiCtlException) { return null; } // empty/non-text clipboard - nothing worth restoring
+        catch (UiCtlException) { return null; } // empty/non-text clipboard - nothing to restore verbatim
     }
 }

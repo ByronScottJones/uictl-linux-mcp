@@ -99,9 +99,16 @@ public static class Clipboard
                 if (mayForkOnSuccess && process.ExitCode == 0)
                     return (process.ExitCode, "", ""); // see class doc comment - draining output here would wait on the forked child's inherited pipe
 
-                string stdout = await process.StandardOutput.ReadToEndAsync();
-                string stderr = await process.StandardError.ReadToEndAsync();
-                return (process.ExitCode, stdout, stderr);
+                // Concurrent, not sequential - a large enough stdout+stderr
+                // pair could otherwise deadlock (the child blocks writing to
+                // whichever pipe fills up first while we're still draining
+                // the other one). Not a real risk for these tools' actual
+                // output (a one-line error message at most), but free to
+                // get right.
+                Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+                Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+                await Task.WhenAll(stdoutTask, stderrTask);
+                return (process.ExitCode, stdoutTask.Result, stderrTask.Result);
             }
         });
 }
