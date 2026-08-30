@@ -109,6 +109,14 @@ public static class FeedbackStore
     {
         string? dir = Path.GetDirectoryName(FilePath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(file, JsonOptions));
+
+        // Atomic replace, same pattern as WaylandScreenshotBackend's
+        // .desktop file write - a process killed mid-File.WriteAllText
+        // would otherwise leave a truncated/corrupt feedback.json that
+        // Load() can no longer parse (see its own doc comment on why
+        // that's surfaced loudly rather than silently reset to empty).
+        string tmpPath = Path.Combine(dir ?? "", $"feedback.json.tmp.{Guid.NewGuid():N}");
+        File.WriteAllText(tmpPath, JsonSerializer.Serialize(file, JsonOptions));
+        File.Move(tmpPath, FilePath, overwrite: true);
     }
 }

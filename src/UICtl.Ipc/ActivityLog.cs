@@ -73,6 +73,13 @@ internal static class ActivityLog
         JsonValueKind.Object => element.EnumerateObject().ToDictionary(p => p.Name, p => ToPlainObject(p.Value)),
         JsonValueKind.Array => element.EnumerateArray().Select(ToPlainObject).ToList(),
         JsonValueKind.String => element.GetString(),
+        // int64-or-double, not decimal - loses precision on a number
+        // outside long's range or needing more than double's ~15-17
+        // significant digits. Not a real gap for this project's actual
+        // command params (window ids, coordinates, timeouts, feedback
+        // ids) - revisit if a future command ever logs something that
+        // genuinely needs exact big-integer/high-precision-decimal
+        // round-tripping.
         JsonValueKind.Number => element.TryGetInt64(out long l) ? l : element.GetDouble(),
         JsonValueKind.True => true,
         JsonValueKind.False => false,
