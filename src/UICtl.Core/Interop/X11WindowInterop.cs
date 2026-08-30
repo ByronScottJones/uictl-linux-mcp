@@ -69,7 +69,11 @@ internal static class X11WindowInterop
     /// are the first four ints, which is all this project needs - read
     /// them directly out of a buffer sized generously for the whole
     /// struct (Xlib never writes past its own definition; over-allocating
-    /// is just wasted stack, not a correctness risk).
+    /// is just wasted stack, not a correctness risk). Unlike
+    /// BuildActiveWindowClientMessage below, this needs no architecture
+    /// guard: four leading `int` fields sit at offsets 0/4/8/12 on any
+    /// architecture (32- or 64-bit, no pointer/long field precedes them
+    /// to make alignment diverge).
     /// </summary>
     public const int WindowAttributesBufferSize = 512;
 
@@ -88,10 +92,13 @@ internal static class X11WindowInterop
     /// way any EWMH window manager (including Mutter's X11 mode) accepts
     /// an external activation request. Field offsets verified against
     /// standard x86_64 struct layout (natural alignment, no explicit
-    /// packing) for XClientMessageEvent as declared in X11/Xlib.h.
+    /// packing) for XClientMessageEvent as declared in X11/Xlib.h - same
+    /// x86_64/arm64-only reasoning as X11ImageInterop's XImage offsets,
+    /// see NativeAbi.cs.
     /// </summary>
     public static byte[] BuildActiveWindowClientMessage(nuint target, nuint netActiveWindowAtom)
     {
+        NativeAbi.EnsureSupported("EWMH activation message's XClientMessageEvent field offsets");
         var buf = new byte[192];
         BitConverter.GetBytes(ClientMessageType).CopyTo(buf, 0);   // type
         // serial (8, offset 8), send_event (4, offset 16), display ptr (8, offset 24) - left zero, Xlib fills serial/send_event itself on send

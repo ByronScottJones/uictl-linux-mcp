@@ -121,6 +121,8 @@ internal static class UinputDevice
 
     private static Device Create()
     {
+        NativeAbi.EnsureSupported("uinput device/event struct layout and ioctl encoding");
+
         int fd = UinputInterop.OpenWriteNonBlock();
         if (fd < 0)
             throw new UiCtlException($"could not open {UinputInterop.UinputPath} for writing ({ErrnoMessage()}) - is $USER in the 'input' group? See `uictl permissions`.");
