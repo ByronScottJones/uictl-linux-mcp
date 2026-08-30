@@ -14,6 +14,10 @@ namespace UICtl.Core.Interop;
 /// confirming both the offsets and the "32bpp TrueColor" assumption
 /// Screenshot.cs relies on (see X11ScreenCapture.cs).
 ///
+/// Verified on x86_64 only - see NativeAbi.cs for why these offsets are
+/// reasoned (not yet independently live-verified) to also hold on arm64,
+/// and CaptureRgba's guard against every other architecture.
+///
 /// Real, live-confirmed finding along the way: XGetImage against the
 /// root window fails with a BadMatch X error under XWayland (this dev
 /// machine's only available session type) - the root window has no real
@@ -42,7 +46,7 @@ internal static class X11ImageInterop
     [DllImport(LibX11)]
     public static extern void XDestroyImage(IntPtr image);
 
-    // XImage field offsets (x86_64, natural alignment - see class doc comment for how these were confirmed).
+    // XImage field offsets (x86_64/arm64 LP64 natural alignment - see class doc comment and NativeAbi.cs for how these were confirmed/reasoned).
     private const int DataOffset = 16;
     private const int DepthOffset = 40;
     private const int BytesPerLineOffset = 44;
@@ -64,13 +68,7 @@ internal static class X11ImageInterop
     /// </summary>
     public static byte[] CaptureRgba(IntPtr display, nuint drawable, int x, int y, int width, int height)
     {
-        // The field offsets above were hand-measured against this
-        // machine's x86_64 XImage layout (see class doc comment) - they
-        // are not derived from the struct definition, so silently reading
-        // them on another ABI (arm64, x86) would misinterpret memory
-        // rather than fail loudly.
-        if (RuntimeInformation.ProcessArchitecture != Architecture.X64)
-            throw new UiCtlException($"X11 pixel capture's XImage field offsets are only verified for x86_64, not {RuntimeInformation.ProcessArchitecture} - refusing to read possibly-wrong struct offsets");
+        NativeAbi.EnsureSupported("X11 pixel capture's XImage field offsets");
 
         IntPtr image = XGetImage(display, drawable, x, y, (uint)width, (uint)height, AllPlanes, ZPixmap);
         if (image == IntPtr.Zero)

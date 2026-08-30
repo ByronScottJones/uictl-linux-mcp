@@ -69,6 +69,32 @@ connections to AT-SPI's registry and the Shell extension.
 | clipboard | Shell out to `wl-copy`/`wl-paste` (Wayland) or `xclip` (X11), selected by the same session-type detection as windows. Native-protocol implementation is a possible follow-up if shelling out proves fragile. |
 | permissions.status | **Implemented** (Phase 2, `Permissions.cs`): `{"sessionType": "x11"|"wayland", "inputMethod": "uinput"|"xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool \| null, "interactive": bool}`. `inputMethod` always reports `"uinput"` for now (XTest isn't built, so there's nothing to choose between yet). `shellExtensionConnected` is always `false` on Wayland until the companion extension exists (Phase 3). |
 
+## CPU architecture (x86_64/arm64)
+
+The project has no build-level architecture restriction (no
+`RuntimeIdentifier` pin, publishes as a normal portable .NET app) — the
+only real architecture dependency is in this codebase's hand-rolled
+native struct offsets and ioctl encoding: `X11ImageInterop.cs` (XImage),
+`X11WindowInterop.cs`'s `BuildActiveWindowClientMessage`
+(XClientMessageEvent), and `UinputInterop.cs`/`UinputDevice.cs`
+(`input_event`/`uinput_user_dev`/ioctl direction bits). All of it assumes
+the standard 64-bit Linux LP64 data model with natural (unpacked) struct
+alignment and little-endian byte order.
+
+x86_64's SysV ABI and arm64's Linux ABI (AAPCS64) share that description
+exactly, so these offsets are **reasoned to also work on arm64** — but
+only the x86_64 offsets have been hand-verified live (against `XGetPixel`
+as ground truth, see `X11ImageInterop.cs`'s doc comment); there is no
+arm64 machine available to this project to independently confirm against.
+`Interop/NativeAbi.cs` centralizes this reasoning and throws a clear error
+on any architecture outside `{x86_64, arm64} × little-endian` rather than
+silently misreading a struct offset or misencoding an ioctl request — the
+same "flag the untested gap rather than assume" precedent as the XWayland
+root-capture note below. If someone runs this on real arm64 hardware, that
+would be the thing worth live-verifying and folding back into this note
+(and `X11ImageInterop.cs`'s/`NativeAbi.cs`'s doc comments) rather than
+just deleting the caveat.
+
 ## Coordinate spaces
 
 X11 gives a single global "virtual screen" pixel space (origin top-left of

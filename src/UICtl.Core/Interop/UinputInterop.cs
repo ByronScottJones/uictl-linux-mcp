@@ -25,7 +25,10 @@ internal static class UinputInterop
     public const int UinputUserDevSize = NameSize + 8 + 4 + 4 * AbsCnt * 4;
 
     // struct input_event (input.h, 64-bit): struct timeval time (2x long =
-    // 16 bytes on x86_64); u16 type; u16 code; s32 value. Total = 24 bytes.
+    // 16 bytes under the LP64 data model x86_64 and arm64 both use - a
+    // 32-bit target's 4-byte long would make this 16 bytes total instead,
+    // but this project only reasons about 64-bit Linux, see NativeAbi.cs);
+    // u16 type; u16 code; s32 value. Total = 24 bytes.
     public const int InputEventSize = 16 + 2 + 2 + 4;
 
     public const ushort EvSyn = 0x00;
@@ -47,7 +50,9 @@ internal static class UinputInterop
     public const int BtnRight = 0x111;
     public const int BtnMiddle = 0x112;
 
-    // asm-generic/ioctl.h direction/shift layout (standard on x86_64 Linux).
+    // asm-generic/ioctl.h direction/shift layout - shared by x86_64 and
+    // arm64 Linux (and most other Linux ports); alpha/mips/powerpc/sparc
+    // use a different layout but are out of scope, see NativeAbi.cs.
     private const uint IocWrite = 1;
     private const int IocNrShift = 0;
     private const int IocTypeShift = 8;
