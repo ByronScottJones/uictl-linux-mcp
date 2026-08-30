@@ -18,8 +18,9 @@ namespace UICtl.Ipc;
 /// WithFocusHold so a held window gets re-activated before every
 /// focus-sensitive action. Phase 4: displays.list/screenshot/pixel (see
 /// DisplayConfig.cs/Screenshot.cs/Pixel.cs), plus ocr (see Ocr.cs/
-/// TesseractEngine.cs) and clipboard.get/clipboard.set (see Clipboard.cs)
-/// - wait-for is still "not implemented yet", along with feedback/log. ActivityLog/
+/// TesseractEngine.cs), clipboard.get/clipboard.set (see Clipboard.cs),
+/// and waitFor (see WaitFor.cs) - Phase 4 is done. Only feedback/log
+/// (Phase 5) remain "not implemented yet". ActivityLog/
 /// UICtlGate gating (both still forward through unconditionally) arrives
 /// in Phase 5, same as macOS/Windows.
 /// </summary>
@@ -68,6 +69,7 @@ public static class CommandDispatcher
         "ocr" => RunOcr(p),
         "clipboard.get" => new Dictionary<string, object?> { ["text"] = Clipboard.Get() },
         "clipboard.set" => ClipboardSet(p),
+        "waitFor" => RunWaitFor(p),
 
         _ => throw new UiCtlException($"not implemented yet: {command}"),
     };
@@ -208,6 +210,19 @@ public static class CommandDispatcher
     {
         Clipboard.Set(p.GetStringOrThrow("text"));
         return new Dictionary<string, object?> { ["set"] = true };
+    }
+
+    private static Dictionary<string, object?> RunWaitFor(JsonElement p)
+    {
+        var (found, element) = WaitFor.Poll(
+            windowId: p.GetLongOrNull("window"),
+            appSelector: p.GetStringOrNull("app"),
+            roleFilter: p.GetStringOrNull("role"),
+            titleContains: p.GetStringOrNull("title"),
+            timeoutSeconds: p.GetDoubleOrNull("timeout"));
+        var data = new Dictionary<string, object?> { ["found"] = found };
+        if (element is not null) data["element"] = element;
+        return data;
     }
 
     /// <summary>
