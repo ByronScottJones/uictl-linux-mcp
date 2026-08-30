@@ -20,6 +20,7 @@ root.Add(QueryCommands.Permissions());
 root.Add(QueryCommands.Windows());
 root.Add(QueryCommands.Displays());
 root.Add(CaptureCommands.Elements());
+root.Add(CaptureCommands.WaitFor());
 root.Add(CaptureCommands.Screenshot());
 root.Add(CaptureCommands.Pixel());
 root.Add(CaptureCommands.Ocr());
@@ -32,7 +33,7 @@ root.Add(WindowCommands.Activate());
 root.Add(WindowCommands.Focus());
 root.Add(ClipboardCommands.Clipboard());
 
-// More subcommands land here phase by phase (wait-for, feedback, log,
-// mcp) - see ENGINEERING.md's build plan.
+// More subcommands land here phase by phase (feedback, log, mcp) - see
+// ENGINEERING.md's build plan.
 
 return await root.Parse(args).InvokeAsync();

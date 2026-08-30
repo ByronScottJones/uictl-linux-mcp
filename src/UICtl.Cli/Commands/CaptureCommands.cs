@@ -77,6 +77,33 @@ internal static class CaptureCommands
         return cmd;
     }
 
+    public static Command WaitFor()
+    {
+        var window = new Option<long?>("--window") { Description = "Window id (from `windows`) to poll." };
+        var app = new Option<string?>("--app") { Description = "App to poll (name substring or pid). Either this or --window is required." };
+        var role = new Option<string?>("--role") { Description = "Only match an element with this AT-SPI role name." };
+        var title = new Option<string?>("--title") { Description = "Only match an element whose name contains this substring." };
+        var timeout = new Option<double?>("--timeout") { Description = "Seconds to keep polling before giving up. Defaults to 5." };
+
+        var cmd = new Command("wait-for", "Poll a window's AT-SPI elements every 250ms until one matches --role/--title, or --timeout elapses.");
+        cmd.Add(window);
+        cmd.Add(app);
+        cmd.Add(role);
+        cmd.Add(title);
+        cmd.Add(timeout);
+        cmd.SetAction(async (pr, ct) =>
+        {
+            var args = new Dictionary<string, object?>();
+            if (pr.GetValue(window) is { } w) args["window"] = w;
+            if (pr.GetValue(app) is { } a) args["app"] = a;
+            if (pr.GetValue(role) is { } r) args["role"] = r;
+            if (pr.GetValue(title) is { } t) args["title"] = t;
+            if (pr.GetValue(timeout) is { } to) args["timeout"] = to;
+            return await CliRunner.RunAsync("waitFor", args, ct);
+        });
+        return cmd;
+    }
+
     public static Command Elements()
     {
         var window = new Option<long?>("--window") { Description = "Window id (from `windows`). Either this or --app is required." };
