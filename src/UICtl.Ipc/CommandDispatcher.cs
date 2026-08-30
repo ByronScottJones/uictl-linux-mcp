@@ -12,11 +12,14 @@ namespace UICtl.Ipc;
 ///
 /// Phase 1: apps.list/windows.list/elements/type(--element), AT-SPI-based
 /// (see Accessibility.cs). Phase 2: permissions.status/click/move/scroll/
-/// key/type(synthesized), uinput-based (see InputSynthesis.cs). Everything
-/// else (activate/focus/screenshot/ocr/pixel/clipboard, feedback, log)
-/// still throws "not implemented yet" - later phases. ActivityLog/UICtlGate
-/// gating (both still forward through unconditionally) arrives in Phase 5,
-/// same as macOS/Windows.
+/// key/type(synthesized), uinput-based (see InputSynthesis.cs). Phase 3:
+/// activate/focus.hold/focus.release/focus.status (see WindowActivation.cs/
+/// FocusHoldStore.cs) - click/move/scroll/key/type are wrapped with
+/// WithFocusHold so a held window gets re-activated before every
+/// focus-sensitive action. Everything else (screenshot/ocr/pixel/
+/// clipboard, feedback, log) still throws "not implemented yet" - later
+/// phases. ActivityLog/UICtlGate gating (both still forward through
+/// unconditionally) arrives in Phase 5, same as macOS/Windows.
 /// </summary>
 public static class CommandDispatcher
 {
@@ -47,12 +50,16 @@ public static class CommandDispatcher
         "apps.list" => new Dictionary<string, object?> { ["apps"] = Accessibility.ListApps(p.GetBoolOrDefault("all")) },
         "windows.list" => WindowsList(p),
         "elements" => Elements(p),
-        "type" => TypeText(p),
+        "type" => WithFocusHold(() => TypeText(p)),
         "permissions.status" => Permissions.GetStatus(),
-        "click" => Click(p),
-        "move" => Move(p),
-        "scroll" => Scroll(p),
-        "key" => Key(p),
+        "click" => WithFocusHold(() => Click(p)),
+        "move" => WithFocusHold(() => Move(p)),
+        "scroll" => WithFocusHold(() => Scroll(p)),
+        "key" => WithFocusHold(() => Key(p)),
+        "activate" => Activate(p),
+        "focus.hold" => FocusHold(p),
+        "focus.release" => FocusHoldStore.Release(),
+        "focus.status" => FocusHoldStore.Status(),
 
         _ => throw new UiCtlException($"not implemented yet: {command}"),
     };
@@ -83,7 +90,7 @@ public static class CommandDispatcher
         return data;
     }
 
-    private static object TypeText(JsonElement p)
+    private static Dictionary<string, object?> TypeText(JsonElement p)
     {
         string text = p.GetStringOrThrow("text");
         string? elementId = p.GetStringOrNull("element");
@@ -97,7 +104,7 @@ public static class CommandDispatcher
         return new Dictionary<string, object?> { ["method"] = method, ["element"] = elementId };
     }
 
-    private static object Click(JsonElement p)
+    private static Dictionary<string, object?> Click(JsonElement p)
     {
         string? elementId = p.GetStringOrNull("element");
         if (elementId is null && p.GetStringOrNull("at") is null)
@@ -111,14 +118,14 @@ public static class CommandDispatcher
         return new Dictionary<string, object?> { ["clicked"] = at };
     }
 
-    private static object Move(JsonElement p)
+    private static Dictionary<string, object?> Move(JsonElement p)
     {
         Point at = p.GetPointOrThrow("at");
         InputSynthesis.Move(at);
         return new Dictionary<string, object?> { ["moved"] = true };
     }
 
-    private static object Scroll(JsonElement p)
+    private static Dictionary<string, object?> Scroll(JsonElement p)
     {
         Point at = p.GetPointOrThrow("at");
         int dx = p.GetIntOrNull("dx") ?? 0;
@@ -127,7 +134,7 @@ public static class CommandDispatcher
         return new Dictionary<string, object?> { ["scrolled"] = true };
     }
 
-    private static object Key(JsonElement p)
+    private static Dictionary<string, object?> Key(JsonElement p)
     {
         string combo = p.GetStringOrThrow("combo");
         InputSynthesis.SendKeyCombo(combo);
@@ -141,4 +148,37 @@ public static class CommandDispatcher
         "center" or "middle" => MouseButton.Center,
         _ => throw new UiCtlException($"unknown button \"{button}\" (expected left, right, or center)"),
     };
+
+    private static object Activate(JsonElement p)
+    {
+        string app = p.GetStringOrThrow("app");
+        int pid = AppSelector.Resolve(app);
+        long? windowId = p.GetLongOrNull("window");
+        WindowActivation.ActivateForApp(pid, windowId);
+        return new Dictionary<string, object?> { ["pid"] = pid };
+    }
+
+    private static object FocusHold(JsonElement p)
+    {
+        string? appSelector = p.GetStringOrNull("app");
+        var resolved = WindowResolver.Resolve(p.GetLongOrNull("window"), appSelector);
+        string label = appSelector ?? resolved.Pid.ToString();
+        return FocusHoldStore.Hold(label, resolved.Pid, resolved.WindowId);
+    }
+
+    /// <summary>
+    /// Wraps click/move/scroll/key/type: while a hold is active, re-activates
+    /// the held window *before* the action runs (a human may have clicked
+    /// away since the hold started), then adds the compact "focusHold"
+    /// marker to the response - see FocusHoldStore.ReassertIfHeld. Omits
+    /// the field entirely when no hold is active, matching this codebase's
+    /// existing convention for optional fields (e.g. Elements' "truncated").
+    /// </summary>
+    private static Dictionary<string, object?> WithFocusHold(Func<Dictionary<string, object?>> action)
+    {
+        var focusHold = FocusHoldStore.ReassertIfHeld();
+        var data = action();
+        if (focusHold is not null) data["focusHold"] = focusHold;
+        return data;
+    }
 }

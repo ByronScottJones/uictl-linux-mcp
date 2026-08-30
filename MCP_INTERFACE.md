@@ -76,15 +76,23 @@ content, with `isError` set to `!ok`.
   - macOS: `CGWindowID` (`UInt32`).
   - Windows: `HWND` value (may exceed 32 bits).
   - Linux, X11 backend: the X11 `Window` (`XID`, an unsigned 32-bit value).
-  - Linux, Wayland/GNOME backend: whatever id scheme the companion GNOME
-    Shell extension assigns internally to a `Meta.Window` (Mutter has no
-    stable public numeric window id of its own) — document the exact scheme
-    here once Phase 3 defines it. Because a single Linux process may have
-    two live backends (X11 windows via XWayland *and* Wayland-native windows
-    on the same GNOME session), a Linux `windowId` is **not guaranteed
-    unique across backends** the way it is on macOS/Windows — callers
-    should treat it as opaque and always re-resolve via the same call that
-    gave it to them (`windows.list`), never assume cross-backend uniqueness.
+  - Linux, Wayland/GNOME backend (Phase 3): the raw Mutter
+    `stable_sequence` (`guint32`) of the `Meta.Window`, reported by the
+    companion GNOME Shell extension (Mutter has no other stable public
+    numeric window id of its own) — stable for that window's lifetime,
+    never reused. **This is a completely separate id space from
+    `windows.list`'s own AT-SPI-derived `windowId`** (see `windows.list`
+    below) — `activate`/`focus.*` never expose or consume a Wayland
+    `stable_sequence` directly; internally, `WindowActivation` correlates
+    by pid (already resolved from the `app`/`window` the caller gave) and,
+    when a pid has more than one window, by title-matching against
+    `windows.list`'s own AT-SPI data for that pid. Because a single Linux
+    process may have two live backends (X11 windows via XWayland *and*
+    Wayland-native windows on the same GNOME session), a Linux `windowId`
+    is **not guaranteed unique across backends** the way it is on
+    macOS/Windows — callers should treat it as opaque and always
+    re-resolve via the same call that gave it to them (`windows.list`),
+    never assume cross-backend uniqueness.
 
 ## App/window selectors
 
@@ -198,22 +206,33 @@ since the underlying concepts differ:
 ### `uictl_windows`
 
 `data`: `{"windows": [{"windowId": int, "pid": int, "title": string, "frame": Frame, "displayId": int | null}, ...]}`.
-On Linux, only windows visible to the currently-active backend (X11 or
-Wayland/GNOME-extension) are listed — see "Window id" above.
+
+- Linux: **entirely AT-SPI-based**, identically under X11 and Wayland (see
+  `ENGINEERING.md`) — does *not* route through the X11/Wayland
+  `IWindowBackend` split `activate`/`focus.*` use (Phase 3). Only windows
+  belonging to an AT-SPI-registered app are listed, regardless of session
+  type.
 
 ### `uictl_activate`
 
-`data`: `{"pid": int, ...}` — resolved pid at minimum, mirroring
-macOS/Windows.
+`data`: `{"pid": int}` — resolved pid at minimum, mirroring macOS/Windows.
+
+- Linux: goes through `IWindowBackend` (Phase 3) — the companion GNOME
+  Shell extension over D-Bus on Wayland, direct Xlib/EWMH on X11, chosen
+  by session type (see `uictl_permissions`' `sessionType`). Resolves the
+  `app`/`window` selector to a pid the same way other tools do, then
+  correlates that pid to a live window via the backend (see "Window id"
+  above) — `window`, when given, only disambiguates among that pid's
+  windows by title-matching against `windows.list`'s AT-SPI data, it is
+  never passed through to the backend directly.
 
 ### `uictl_focus_hold` / `uictl_focus_status` / `uictl_focus_release`
 
-Same shape as macOS/Windows — see those repos' copies of this file for the
-full field list (`held`, `app`, `pid`, `windowId`, `isFrontmost`,
-`restoresTo`, `restoredFocus`) and the `focusHold` field carried by
-`uictl_click`/`uictl_move`/`uictl_scroll`/`uictl_type`/`uictl_key` while a
-hold is active. On Linux, "activate"/"raise" for the Wayland backend goes
-through the companion Shell extension the same way `windows.list` does.
+- `uictl_focus_hold` `data`: `{"held": true, "app": string, "pid": int, "windowId": int, "isFrontmost": true, "restoresTo": {"pid": int, "title": string} | null}`.
+- `uictl_focus_status` `data`: `{"held": false}` when nothing is held, otherwise the same shape as `uictl_focus_hold`'s (with `isFrontmost` freshly re-checked, not cached from hold-time).
+- `uictl_focus_release` `data`: `{"held": false, "restoredFocus": bool}` — `restoredFocus` is best-effort (false if there was nothing to restore to, or the restore attempt itself failed).
+- `uictl_click`/`uictl_move`/`uictl_scroll`/`uictl_type`/`uictl_key`'s `data` gains `"focusHold": {"held": true, "windowId": int, "reasserted": bool}` while a hold is active (omitted entirely otherwise) — `reasserted` reports whether re-activating the held window before this call actually succeeded.
+- Linux: `focus.hold` resolves its target exactly like `activate` (pid + optional `window` for disambiguation, via the same `IWindowBackend`), and additionally captures whatever window was focused *before* activating the held target as `restoresTo` (best-effort — `null` if the backend can't determine it). Every focus-sensitive command re-activates the held window immediately before acting, for as long as the hold is active — this is what makes it "pin" focus, not just record intent.
 
 ### `uictl_screenshot`
 

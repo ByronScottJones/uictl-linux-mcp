@@ -20,20 +20,16 @@ public static class Permissions
 
     public static PermissionsStatus GetStatus()
     {
-        // Detected from $WAYLAND_DISPLAY/$DISPLAY, not $XDG_SESSION_TYPE -
-        // observed unset in a real session during development, see
-        // ENGINEERING.md.
-        bool hasWayland = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"));
-        bool hasX11 = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY"));
-        string sessionType = hasWayland ? "wayland" : "x11";
+        bool hasWayland = SessionDetection.HasWayland;
+        bool hasX11 = SessionDetection.HasX11;
+        string sessionType = SessionDetection.SessionType;
 
         bool uinputWritable = UinputDevice.ProbeWritable();
         bool atspiEnabled = TryProbeAtspi();
 
-        // The companion GNOME Shell extension isn't built yet (a later
-        // phase per ENGINEERING.md) - always false on Wayland, not
-        // applicable on X11.
-        bool? shellExtensionConnected = sessionType == "wayland" ? false : null;
+        // Not applicable on X11 (activate/focus.* use direct Xlib/EWMH
+        // there, no Shell extension involved) - only probed on Wayland.
+        bool? shellExtensionConnected = sessionType == "wayland" ? TryProbeShellExtension() : null;
 
         bool interactive = (hasWayland || hasX11) && Tmds.DBus.Address.Session is not null;
 
@@ -57,6 +53,19 @@ public static class Permissions
         try
         {
             Accessibility.ListApps(includeBackground: false);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryProbeShellExtension()
+    {
+        try
+        {
+            new WaylandWindowBackend().ListWindows();
             return true;
         }
         catch

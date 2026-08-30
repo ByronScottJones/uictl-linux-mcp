@@ -92,12 +92,16 @@ implement an ATK/AT-SPI bridge properly) don't expose useful nodes via
 - **Element ids expire.** Every `elements`/`screenshot --annotate` call
   re-walks the tree and re-numbers it. Re-list before acting if any time (or
   any other action) has passed.
-- **Wayland window management needs the companion Shell extension.** If
-  `uictl_windows`/`uictl_activate` return nothing for an app you know is
-  running, check `uictl permissions`' `shellExtensionConnected` field —
-  `false` or `null` means either you're on X11 (expected, no extension
-  needed there) or the extension isn't installed/enabled on a Wayland
-  session (see `gnome-extension/README.md`).
+- **Wayland `activate`/`focus.*` need the companion Shell extension.**
+  (`windows`/`elements` don't — those stay AT-SPI-based on every session
+  type.) If `uictl_activate`/`uictl_focus_hold` fail on a Wayland session,
+  check `uictl permissions`' `shellExtensionConnected` field — `false` or
+  `null` means either you're on X11 (expected, no extension needed there)
+  or the extension isn't installed/enabled (see `gnome-extension/README.md`).
+  A **brand-new** install of the extension needs a logout/login (or
+  reboot) before GNOME Shell is even aware it exists at all — confirmed
+  live, this isn't optional/skippable. Toggling an already-known extension
+  (e.g. after a code update) is live, no relogin needed.
 - **Input synthesis needs `/dev/uinput` access.** If clicks/keystrokes
   silently no-op, check `uictl permissions`' `uinputWritable` field — you
   likely need `sudo usermod -aG input $USER` plus a fresh login session (see
