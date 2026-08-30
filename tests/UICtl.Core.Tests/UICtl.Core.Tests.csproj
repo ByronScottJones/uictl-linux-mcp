@@ -23,4 +23,8 @@
     <ProjectReference Include="..\..\src\UICtl.Ipc\UICtl.Ipc.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Fixtures\ocr-sample.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

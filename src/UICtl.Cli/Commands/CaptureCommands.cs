@@ -51,6 +51,32 @@ internal static class CaptureCommands
         return cmd;
     }
 
+    public static Command Ocr()
+    {
+        var image = new Option<string?>("--image") { Description = "OCR a standalone PNG file instead of a live capture. Can't be combined with --window/--app/--region." };
+        var window = new Option<long?>("--window") { Description = "Window id (from `windows`) to OCR." };
+        var app = new Option<string?>("--app") { Description = "App whose window to OCR (name substring or pid)." };
+        var region = new Option<string?>("--region") { Description = "\"x,y,w,h\" screen-space rectangle to OCR - crops whatever --window/--app (or the whole screen, if neither given) resolved to." };
+
+        var cmd = new Command("ocr",
+            "Read on-screen text via Tesseract. With no --image/--window/--app/--region, OCRs the whole screen. " +
+            "On Wayland this goes through the same real \"Take Screenshot\" consent dialog as `screenshot` on every call - see AGENTS.md.");
+        cmd.Add(image);
+        cmd.Add(window);
+        cmd.Add(app);
+        cmd.Add(region);
+        cmd.SetAction(async (pr, ct) =>
+        {
+            var args = new Dictionary<string, object?>();
+            if (pr.GetValue(image) is { } i) args["image"] = i;
+            if (pr.GetValue(window) is { } w) args["window"] = w;
+            if (pr.GetValue(app) is { } a) args["app"] = a;
+            if (pr.GetValue(region) is { } r) args["region"] = r;
+            return await CliRunner.RunAsync("ocr", args, ct);
+        });
+        return cmd;
+    }
+
     public static Command Elements()
     {
         var window = new Option<long?>("--window") { Description = "Window id (from `windows`). Either this or --app is required." };

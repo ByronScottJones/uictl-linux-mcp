@@ -22,6 +22,7 @@ root.Add(QueryCommands.Displays());
 root.Add(CaptureCommands.Elements());
 root.Add(CaptureCommands.Screenshot());
 root.Add(CaptureCommands.Pixel());
+root.Add(CaptureCommands.Ocr());
 root.Add(InputCommands.Type());
 root.Add(InputCommands.Click());
 root.Add(InputCommands.Move());
@@ -30,7 +31,7 @@ root.Add(InputCommands.Key());
 root.Add(WindowCommands.Activate());
 root.Add(WindowCommands.Focus());
 
-// More subcommands land here phase by phase (wait-for/ocr, clipboard,
+// More subcommands land here phase by phase (wait-for, clipboard,
 // feedback, log, mcp) - see ENGINEERING.md's build plan.
 
 return await root.Parse(args).InvokeAsync();

@@ -44,6 +44,13 @@ internal static class ParamsExtensions
     public static Point GetPointOrThrow(this JsonElement element, string name) =>
         GetPointOrNull(element, name) ?? throw new UiCtlException($"\"{name}\" is required");
 
+    /// <summary>Parses an "x,y,w,h" string param (e.g. ocr's `region`) into a Frame.</summary>
+    public static Frame? GetFrameOrNull(this JsonElement element, string name)
+    {
+        string? raw = element.GetStringOrNull(name);
+        return raw is null ? null : Parsing.ParseFrame(raw);
+    }
+
     private static bool TryGetNonNull(JsonElement element, string name, out JsonElement value)
     {
         if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out value) && value.ValueKind != JsonValueKind.Null)
