@@ -317,6 +317,10 @@ Project references: `UICtl.Ipc` → `UICtl.Core`; `UICtl.Mcp` → `UICtl.Ipc`;
 
 ## Development filesystem note
 
+The following section relates only to development under WSL, and not Ubuntu or other full Linux systems.
+
+**Deprecated**
+```
 This repo's canonical working copy lives in WSL's **native** filesystem
 (`~/dev/uictl-linux-mcp` inside Ubuntu 26.04, i.e. `ext4`), not under
 `/mnt/c/...`. Building this solution from WSL against a Windows-mounted
@@ -328,6 +332,7 @@ tooling via the UNC path
 (`\\wsl.localhost\Ubuntu-26.04\home\<user>\dev\uictl-linux-mcp`) if needed;
 always `dotnet build`/`run`/`test` from inside WSL against the native path,
 never `/mnt/c/...`.
+```
 
 ## Build plan / phases
 
