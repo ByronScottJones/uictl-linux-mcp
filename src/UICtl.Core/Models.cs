@@ -63,3 +63,18 @@ public readonly record struct PixelColor(byte R, byte G, byte B, byte A);
 
 /// <summary>One recognized line of text. <c>Confidence</c> is a real Tesseract per-word-averaged value on this platform (unlike Windows' always-null) - see MCP_INTERFACE.md.</summary>
 public sealed record TextBlock(string Text, Frame Frame, double? Confidence);
+
+/// <summary>
+/// One local feedback draft (`~/.uictl/feedback.json`, see FeedbackStore.cs).
+/// <c>Category</c> is a free-form string (matches MCP_INTERFACE.md's
+/// `category: string`, not a fixed enum) - used as the GitHub issue's
+/// label when submitted. <c>UpdatedAt</c> is null until the first
+/// `feedback.update` call.
+/// </summary>
+public sealed record FeedbackEntry(int Id, string Category, string Title, string Body, DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt);
+
+/// <summary>One GitHub issue returned by a `feedback.checkDuplicates`/`feedback.submit` search - see FeedbackGitHub.cs.</summary>
+public sealed record GitHubIssueSummary(int Number, string Title, string Url, string State);
+
+/// <summary>One entry in the daemon's in-memory activity log (`log.export`, and eventually `log.show`'s GTK4 window - see ActivityLog.cs). <c>Params</c>/<c>Result</c> are already redacted where MCP_INTERFACE.md's rules require it, so they're safe to serialize verbatim.</summary>
+public sealed record ActivityLogEntry(int Id, DateTimeOffset Timestamp, string Command, object? Params, bool Success, object? Result, string? Error, double DurationMs);

@@ -52,6 +52,10 @@ echo "==> Tesseract OCR"
 apt_install tesseract-ocr tesseract-ocr-eng
 check tesseract command -v tesseract
 
+echo "==> xdg-utils (feedback submit's browser-open)"
+apt_install xdg-utils
+check xdgOpen command -v xdg-open
+
 echo "==> 'input' group membership"
 if id -nG "$USER" | grep -qw input; then
 	check inputGroup true
