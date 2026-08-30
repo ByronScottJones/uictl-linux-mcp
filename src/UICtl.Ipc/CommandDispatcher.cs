@@ -18,8 +18,8 @@ namespace UICtl.Ipc;
 /// WithFocusHold so a held window gets re-activated before every
 /// focus-sensitive action. Phase 4: displays.list/screenshot/pixel (see
 /// DisplayConfig.cs/Screenshot.cs/Pixel.cs), plus ocr (see Ocr.cs/
-/// TesseractEngine.cs) - clipboard/wait-for are still "not implemented
-/// yet", along with feedback/log. ActivityLog/
+/// TesseractEngine.cs) and clipboard.get/clipboard.set (see Clipboard.cs)
+/// - wait-for is still "not implemented yet", along with feedback/log. ActivityLog/
 /// UICtlGate gating (both still forward through unconditionally) arrives
 /// in Phase 5, same as macOS/Windows.
 /// </summary>
@@ -66,6 +66,8 @@ public static class CommandDispatcher
         "screenshot" => CaptureScreenshot(p),
         "pixel" => Pixel.At(p.GetPointOrThrow("at")),
         "ocr" => RunOcr(p),
+        "clipboard.get" => new Dictionary<string, object?> { ["text"] = Clipboard.Get() },
+        "clipboard.set" => ClipboardSet(p),
 
         _ => throw new UiCtlException($"not implemented yet: {command}"),
     };
@@ -200,6 +202,12 @@ public static class CommandDispatcher
             appSelector: p.GetStringOrNull("app"),
             region: p.GetFrameOrNull("region"));
         return new Dictionary<string, object?> { ["textBlocks"] = blocks };
+    }
+
+    private static Dictionary<string, object?> ClipboardSet(JsonElement p)
+    {
+        Clipboard.Set(p.GetStringOrThrow("text"));
+        return new Dictionary<string, object?> { ["set"] = true };
     }
 
     /// <summary>

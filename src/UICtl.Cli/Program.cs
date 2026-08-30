@@ -30,8 +30,9 @@ root.Add(InputCommands.Scroll());
 root.Add(InputCommands.Key());
 root.Add(WindowCommands.Activate());
 root.Add(WindowCommands.Focus());
+root.Add(ClipboardCommands.Clipboard());
 
-// More subcommands land here phase by phase (wait-for, clipboard,
-// feedback, log, mcp) - see ENGINEERING.md's build plan.
+// More subcommands land here phase by phase (wait-for, feedback, log,
+// mcp) - see ENGINEERING.md's build plan.
 
 return await root.Parse(args).InvokeAsync();
