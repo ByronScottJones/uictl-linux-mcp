@@ -84,7 +84,7 @@ public static class DisplayConfig
     /// per-backend id" contract without inventing a second, X11-only code
     /// path just to get a real XID (see ENGINEERING.md).
     /// </summary>
-    private static long StableConnectorId(string connector)
+    internal static long StableConnectorId(string connector)
     {
         const ulong offset = 14695981039346656037;
         const ulong prime = 1099511628211;

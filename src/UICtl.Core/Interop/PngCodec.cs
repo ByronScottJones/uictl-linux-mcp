@@ -55,7 +55,7 @@ internal static class PngCodec
         }
 
         using var idatStream = new MemoryStream();
-        using (var zlib = new ZLibStream(idatStream, CompressionLevel.Fastest, leaveOpen: true))
+        using (var zlib = new ZLibStream(idatStream, CompressionLevel.Optimal, leaveOpen: true))
             zlib.Write(raw);
         WriteChunk(output, "IDAT", idatStream.ToArray());
 
@@ -76,8 +76,15 @@ internal static class PngCodec
             uint length = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(pos));
             string type = System.Text.Encoding.ASCII.GetString(png, pos + 4, 4);
             int dataStart = pos + 8;
-            if (dataStart + (int)length > png.Length)
+            if (dataStart + (int)length + 4 > png.Length)
                 throw new UiCtlException("truncated PNG chunk");
+
+            var typeBytes = png.AsSpan(pos + 4, 4);
+            var chunkData = png.AsSpan(dataStart, (int)length);
+            uint expectedCrc = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(dataStart + (int)length));
+            uint actualCrc = Crc32(typeBytes, chunkData);
+            if (actualCrc != expectedCrc)
+                throw new UiCtlException($"corrupt PNG: {type} chunk at offset {pos} failed CRC check (expected {expectedCrc:X8}, got {actualCrc:X8})");
 
             switch (type)
             {
@@ -202,7 +209,7 @@ internal static class PngCodec
         return table;
     }
 
-    private static uint Crc32(byte[] type, byte[] data)
+    private static uint Crc32(ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
     {
         uint c = 0xFFFFFFFF;
         foreach (byte b in type) c = Crc32Table[(c ^ b) & 0xFF] ^ (c >> 8);

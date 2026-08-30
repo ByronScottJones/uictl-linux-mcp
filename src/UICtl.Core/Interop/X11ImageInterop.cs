@@ -64,6 +64,14 @@ internal static class X11ImageInterop
     /// </summary>
     public static byte[] CaptureRgba(IntPtr display, nuint drawable, int x, int y, int width, int height)
     {
+        // The field offsets above were hand-measured against this
+        // machine's x86_64 XImage layout (see class doc comment) - they
+        // are not derived from the struct definition, so silently reading
+        // them on another ABI (arm64, x86) would misinterpret memory
+        // rather than fail loudly.
+        if (RuntimeInformation.ProcessArchitecture != Architecture.X64)
+            throw new UiCtlException($"X11 pixel capture's XImage field offsets are only verified for x86_64, not {RuntimeInformation.ProcessArchitecture} - refusing to read possibly-wrong struct offsets");
+
         IntPtr image = XGetImage(display, drawable, x, y, (uint)width, (uint)height, AllPlanes, ZPixmap);
         if (image == IntPtr.Zero)
             throw new UiCtlException($"XGetImage returned null capturing {width}x{height}+{x}+{y} - drawable may not be viewable");
