@@ -34,9 +34,7 @@ public static class Screenshot
         if (width <= 0 || height <= 0)
             throw new UiCtlException($"resolved a {width}x{height} capture area - nothing to capture");
 
-        byte[] rgba = SessionDetection.HasWayland
-            ? CaptureWaylandCropped(captureFrame, width, height)
-            : CaptureX11(target, captureFrame, width, height);
+        byte[] rgba = CaptureFrame(target, captureFrame, width, height);
 
         List<AnnotatedElement>? elements = null;
         if (annotate)
@@ -67,7 +65,8 @@ public static class Screenshot
         return new ScreenshotResult(fullOutPath, width, height, elements);
     }
 
-    private static Frame WholeScreenFrame(int? screenIndex)
+    /// <summary>The whole virtual screen, or one monitor if <paramref name="screenIndex"/> is given - shared with Ocr.cs, which OCRs the whole screen by default (no window/app/region narrowing it), same as a plain `screenshot` with no selector.</summary>
+    internal static Frame WholeScreenFrame(int? screenIndex = null)
     {
         if (screenIndex is { } idx)
         {
@@ -78,6 +77,10 @@ public static class Screenshot
         var (w, h) = XlibScreenInterop.GetScreenSize();
         return new Frame(0, 0, w, h);
     }
+
+    /// <summary>Captures <paramref name="frame"/> (a window's frame, or a whole-screen/monitor frame from <see cref="WholeScreenFrame"/>) as RGBA, dispatching to the X11 or Wayland backend - shared with Ocr.cs so both commands go through the exact same capture path (including Wayland's real per-call consent dialog, see WaylandScreenshotBackend.cs).</summary>
+    internal static byte[] CaptureFrame(WindowInfo? target, Frame frame, int width, int height) =>
+        SessionDetection.HasWayland ? CaptureWaylandCropped(frame, width, height) : CaptureX11(target, frame, width, height);
 
     private static byte[] CaptureX11(WindowInfo? target, Frame captureFrame, int width, int height)
     {
