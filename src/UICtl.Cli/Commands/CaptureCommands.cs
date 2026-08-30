@@ -83,7 +83,7 @@ internal static class CaptureCommands
         var app = new Option<string?>("--app") { Description = "App to poll (name substring or pid). Either this or --window is required." };
         var role = new Option<string?>("--role") { Description = "Only match an element with this AT-SPI role name." };
         var title = new Option<string?>("--title") { Description = "Only match an element whose name contains this substring." };
-        var timeout = new Option<double?>("--timeout") { Description = "Seconds to keep polling before giving up. Defaults to 5." };
+        var timeout = new Option<double?>("--timeout") { Description = "Seconds to keep polling before giving up. Defaults to 5. Polls every 250ms, so a timeout well under that only gets one or two checks in." };
 
         var cmd = new Command("wait-for", "Poll a window's AT-SPI elements every 250ms until one matches --role/--title, or --timeout elapses.");
         cmd.Add(window);

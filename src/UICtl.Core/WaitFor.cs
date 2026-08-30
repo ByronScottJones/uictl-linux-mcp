@@ -12,6 +12,12 @@ namespace UICtl.Core;
 /// throws immediately - that can never succeed no matter how long it
 /// polls, so failing fast is more useful than waiting out the full
 /// timeout for nothing.
+///
+/// The 250ms interval isn't configurable, so a --timeout well under that
+/// (e.g. 0.1s) only gets one, maybe two, checks in before giving up -
+/// documented on the CLI's --timeout option rather than silently
+/// surprising a caller who expected sub-second timeouts to poll more than
+/// once or twice.
 /// </summary>
 public static class WaitFor
 {
@@ -25,6 +31,7 @@ public static class WaitFor
 
         DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds ?? DefaultTimeoutSeconds);
         var options = new ElementWalkOptions(RoleFilter: roleFilter, TitleContains: titleContains, MaxElements: 1);
+        string? lastFailure = null;
 
         while (true)
         {
@@ -35,16 +42,25 @@ public static class WaitFor
                 if (walk.Elements.Count > 0)
                     return (true, walk.Elements[0]);
             }
-            catch (UiCtlException)
+            catch (UiCtlException ex)
             {
                 // App/window not found yet (hasn't launched, window not up
                 // yet), or a transient AT-SPI hiccup - not found *yet*,
                 // keep polling until the deadline rather than failing the
-                // whole wait on one bad iteration.
+                // whole wait on one bad iteration. Remembered, not logged
+                // per-iteration (this is the normal, expected path while
+                // waiting for an app to launch, not worth a line every
+                // 250ms) - only surfaced once, below, if the wait times out
+                // without ever succeeding.
+                lastFailure = ex.Message;
             }
 
             if (DateTime.UtcNow >= deadline)
+            {
+                if (lastFailure is not null)
+                    Console.Error.WriteLine($"uictl: wait-for gave up after {timeoutSeconds ?? DefaultTimeoutSeconds}s - last resolution/walk attempt failed with: {lastFailure}");
                 return (false, null);
+            }
 
             Thread.Sleep(PollInterval);
         }

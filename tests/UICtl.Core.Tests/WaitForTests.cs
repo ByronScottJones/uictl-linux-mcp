@@ -32,4 +32,29 @@ public class WaitForTests
         Assert.True(sw.Elapsed >= TimeSpan.FromSeconds(1), $"expected to poll for roughly the full 1s timeout, took {sw.Elapsed}");
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"expected to return near the 1s timeout, took {sw.Elapsed}");
     }
+
+    /// <summary>
+    /// Real (not mocked) happy-path test - requires a live desktop session
+    /// with at least one AT-SPI-registered window already on screen, same
+    /// category as ClipboardTests.cs/OcrTests.cs. Deliberately doesn't
+    /// assume which window: picks whatever `windows.list` already reports
+    /// rather than a specific app, since that's the only thing this test
+    /// can rely on on any real GNOME desktop this project targets.
+    /// </summary>
+    [Fact]
+    public void Poll_FindsAnElementImmediatelyWhenAlreadyPresent()
+    {
+        var windows = Accessibility.ListWindows(null);
+        Assert.True(windows.Count > 0, "this test requires at least one AT-SPI window already on screen");
+
+        var sw = Stopwatch.StartNew();
+        var (found, element) = WaitFor.Poll(windows[0].WindowId, null, null, null, timeoutSeconds: 5);
+        sw.Stop();
+
+        Assert.True(found);
+        Assert.NotNull(element);
+        // No filter narrows the match, so this should resolve on the very
+        // first poll - not wait out any meaningful fraction of the timeout.
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"expected an immediate match, took {sw.Elapsed}");
+    }
 }
