@@ -32,8 +32,11 @@ root.Add(InputCommands.Key());
 root.Add(WindowCommands.Activate());
 root.Add(WindowCommands.Focus());
 root.Add(ClipboardCommands.Clipboard());
+root.Add(FeedbackCommands.Feedback());
+root.Add(LogCommands.Log());
 
-// More subcommands land here phase by phase (feedback, log, mcp) - see
-// ENGINEERING.md's build plan.
+// `mcp` lands here once UICtl.Mcp exists - see ENGINEERING.md's build
+// plan. `log show` (GTK4 activity-log window) is a deliberate follow-up
+// to LogCommands.Log(), not built yet either.
 
 return await root.Parse(args).InvokeAsync();

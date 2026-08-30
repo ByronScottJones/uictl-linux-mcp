@@ -19,31 +19,46 @@ namespace UICtl.Ipc;
 /// focus-sensitive action. Phase 4: displays.list/screenshot/pixel (see
 /// DisplayConfig.cs/Screenshot.cs/Pixel.cs), plus ocr (see Ocr.cs/
 /// TesseractEngine.cs), clipboard.get/clipboard.set (see Clipboard.cs),
-/// and waitFor (see WaitFor.cs) - Phase 4 is done. Only feedback/log
-/// (Phase 5) remain "not implemented yet". ActivityLog/
-/// UICtlGate gating (both still forward through unconditionally) arrives
-/// in Phase 5, same as macOS/Windows.
+/// and waitFor (see WaitFor.cs) - Phase 4 is done. Phase 5: feedback.*
+/// (see FeedbackStore.cs/FeedbackGitHub.cs) and log.export (see
+/// ActivityLog.cs) - every non-double-underscore command recorded to
+/// ActivityLog from Dispatch itself, so no per-command wiring was
+/// needed. log.show (the GTK4/libadwaita activity-log window) and the
+/// commands-enabled kill switch it hosts are a deliberate follow-up, not
+/// built here - CommandDispatcher still forwards through unconditionally,
+/// no gate to check yet.
 /// </summary>
 public static class CommandDispatcher
 {
     public static string Dispatch(string command, JsonElement @params)
     {
         var stopwatch = Stopwatch.StartNew();
-        string response = DispatchInner(command, @params);
-        _ = stopwatch.Elapsed; // timing wired up properly once ActivityLog lands (Phase 5)
-        return response;
-    }
-
-    private static string DispatchInner(string command, JsonElement @params)
-    {
+        object? result = null;
+        string? error = null;
+        bool success = false;
+        string response;
         try
         {
-            return Envelope.Success(Execute(command, @params));
+            result = Execute(command, @params);
+            response = Envelope.Success(result);
+            success = true;
         }
         catch (Exception ex)
         {
-            return Envelope.Failure(ex.Message);
+            error = ex.Message;
+            response = Envelope.Failure(error);
         }
+        stopwatch.Stop();
+
+        // Double-underscore commands (__ping__ etc.) are daemon lifecycle/
+        // health-check plumbing, not something a human reviewing "what has
+        // this daemon actually done" cares about - see DaemonServer.cs's
+        // own doc comment for __daemon_log_warning__, handled the same way
+        // by never reaching this method at all.
+        if (!command.StartsWith("__", StringComparison.Ordinal))
+            ActivityLog.Record(command, @params, success, result, error, stopwatch.Elapsed);
+
+        return response;
     }
 
     private static object Execute(string command, JsonElement p) => command switch
@@ -70,6 +85,14 @@ public static class CommandDispatcher
         "clipboard.get" => new Dictionary<string, object?> { ["text"] = Clipboard.Get() },
         "clipboard.set" => ClipboardSet(p),
         "waitFor" => RunWaitFor(p),
+        "feedback.create" => FeedbackCreate(p),
+        "feedback.list" => new Dictionary<string, object?> { ["entries"] = FeedbackStore.List() },
+        "feedback.get" => FeedbackStore.Get(GetIdOrThrow(p)),
+        "feedback.update" => FeedbackUpdate(p),
+        "feedback.delete" => FeedbackDelete(p),
+        "feedback.checkDuplicates" => FeedbackCheckDuplicates(p),
+        "feedback.submit" => FeedbackSubmit(p),
+        "log.export" => LogExport(p),
 
         _ => throw new UiCtlException($"not implemented yet: {command}"),
     };
@@ -210,6 +233,45 @@ public static class CommandDispatcher
     {
         Clipboard.Set(p.GetStringOrThrow("text"));
         return new Dictionary<string, object?> { ["set"] = true };
+    }
+
+    private static int GetIdOrThrow(JsonElement p) => p.GetIntOrNull("id") ?? throw new UiCtlException("\"id\" is required");
+
+    private static FeedbackEntry FeedbackCreate(JsonElement p) =>
+        FeedbackStore.Create(p.GetStringOrThrow("category"), p.GetStringOrThrow("title"), p.GetStringOrThrow("body"));
+
+    private static FeedbackEntry FeedbackUpdate(JsonElement p) =>
+        FeedbackStore.Update(GetIdOrThrow(p), p.GetStringOrNull("category"), p.GetStringOrNull("title"), p.GetStringOrNull("body"));
+
+    private static Dictionary<string, object?> FeedbackDelete(JsonElement p)
+    {
+        int id = GetIdOrThrow(p);
+        FeedbackStore.Delete(id);
+        return new Dictionary<string, object?> { ["deleted"] = true, ["id"] = id };
+    }
+
+    private static Dictionary<string, object?> FeedbackCheckDuplicates(JsonElement p)
+    {
+        var entry = FeedbackStore.Get(GetIdOrThrow(p));
+        var duplicates = FeedbackGitHub.CheckDuplicates(entry, p.GetStringOrNull("repo"), p.GetStringOrNull("token"));
+        return new Dictionary<string, object?> { ["duplicates"] = duplicates };
+    }
+
+    private static Dictionary<string, object?> FeedbackSubmit(JsonElement p)
+    {
+        var entry = FeedbackStore.Get(GetIdOrThrow(p));
+        var (duplicates, issueUrl, opened) = FeedbackGitHub.Submit(entry, p.GetStringOrNull("repo"), p.GetStringOrNull("token"));
+        return new Dictionary<string, object?> { ["duplicates"] = duplicates, ["issueUrl"] = issueUrl, ["opened"] = opened };
+    }
+
+    private static Dictionary<string, object?> LogExport(JsonElement p)
+    {
+        string outPath = p.GetStringOrNull("out") is { Length: > 0 } o ? o : $"uictl-activity-log-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+        string fullOutPath = Path.GetFullPath(outPath);
+        string? dir = Path.GetDirectoryName(fullOutPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        File.WriteAllText(fullOutPath, JsonSerializer.Serialize(ActivityLog.GetAll(), JsonOptions.Default));
+        return new Dictionary<string, object?> { ["path"] = fullOutPath };
     }
 
     private static Dictionary<string, object?> RunWaitFor(JsonElement p)
