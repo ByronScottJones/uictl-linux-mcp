@@ -305,6 +305,78 @@ click-per-call behavior is confirmed to actually be a problem in
 practice (it may be fine for supervised/manual use and only matter for
 tight unattended automation loops).
 
+**Investigated 2026-08-31, blocked by an upstream binding bug, not a
+GNOME limitation:** a real `parent_window` handle (instead of the empty
+`""` this code sends) was suspected as the missing piece for
+`interactive: false`'s stored-permission reuse - all prior testing here
+always sent an empty parent_window, even on a successful
+`interactive: true` call, so the portal may have had nothing to key a
+persisted grant to. Getting a real handle needs GTK4/Wayland's
+`xdg_foreign` export (`gdk_wayland_toplevel_export_handle`, exposed by
+the `GirCore.GdkWayland-4.0` NuGet package - same 0.8.1 version as this
+project's other GirCore packages) from a live, mapped top-level window.
+
+This turned out to be **untestable with the current toolkit**: calling
+`WaylandToplevel.ExportHandle(...)` and invoking the resulting
+`WaylandToplevelExported` callback crashes the process outright -
+`System.Runtime.InteropServices.MarshalDirectiveException: Cannot
+marshal 'parameter #2': SafeHandles cannot be marshaled from unmanaged
+to managed`, thrown from `Gio.Application.Run`'s own argv marshaling on
+return, not from anything in application code. Isolated across three
+independent minimal repros (a throwaway spike using this project's real
+`Interop/PortalInterfaces.cs`; a bare `Adw.Application` + `ExportHandle`
+harness with no D-Bus/portal code at all; the same harness using the
+*legitimate* `WaylandToplevel.NewFromPointer` construction path instead
+of a reflection-based workaround for GirCore's object-wrapper cache) -
+all three crash identically, at the exact moment the native side invokes
+the callback delegate, ruling out an application-level mistake. This
+looks like a genuine bug in `GirCore.GdkWayland-4.0` 0.8.1's marshaling
+of that specific reverse callback, not anything about GNOME's actual
+`xdg_foreign`/portal behavior - the original "no stored-permission
+reuse" finding above is neither confirmed nor refuted by this
+investigation; it's simply still untested. Not pursued further: working
+around a broken third-party binding (hand-rolled `xdg_foreign`
+Wayland-protocol client via raw `libwayland-client` P/Invoke, bypassing
+`GirCore.GdkWayland-4.0` entirely) is a body of work comparable to the
+already-deferred ScreenCast+PipeWire alternative above, not a quick
+follow-up. Revisit if a newer GirCore release fixes this, or if
+ScreenCast+PipeWire gets built instead (it doesn't need a
+`parent_window`/`xdg_foreign` handle at all, sidestepping this bug
+entirely).
+
+**ScreenCast+PipeWire: started 2026-08-31, portal session layer
+confirmed live - this is the real fix.** `PortalRegistration.cs`
+(extracted from `WaylandScreenshotBackend.cs` - both need the same
+app-id registration dance), `Interop/ScreenCastInterfaces.cs`, and
+`WaylandScreenCastBackend.cs` implement
+`org.freedesktop.portal.ScreenCast`'s session flow: `CreateSession` ->
+`SelectSources` (`persist_mode: 2`, plus a saved `restore_token` if one
+exists) -> `Start` -> `OpenPipeWireRemote`. **Live-verified, user-
+confirmed two-run test**: a fresh session (no restore token) showed
+GNOME's source-picker dialog and required a real click to choose a
+monitor and share; the very next run, using the `restore_token` saved
+from the first (`~/.uictl/screencast-restore-token`), completed **with
+no dialog at all** - confirmed by the user watching the screen, not
+inferred from timing. This is the deferred "one-time consent, then
+silent repeat capture" mechanism actually working, unlike Screenshot's
+`interactive:false` (which never granted a stored permission through
+that interface at all) and unlike the blocked `parent_window`
+investigation above.
+
+One real gotcha found getting this far: the `streams` result from
+`Start` (D-Bus type `a(ua{sv})`) decodes via Tmds.DBus as a real
+`ValueTuple<uint, IDictionary<string,object>>[]`, not the `object[]`
+every other portal result in this codebase has needed so far - confirmed
+live via the exact `InvalidCastException` naming the actual runtime
+type; fixed by casting to the correct ValueTuple array type directly.
+
+**Not yet built**: the PipeWire side (`node_id`/fd -> an actual decoded
+frame -> PNG). This is the harder, riskier remaining piece the original
+"substantially larger and riskier" assessment was mainly about - hand-
+rolled P/Invoke against `libpipewire-0.3.so.0` (confirmed installed,
+v1.6.2, no .NET binding exists), including SPA POD format negotiation
+and a native `process` callback for buffer delivery. In progress.
+
 ## GNOME Shell extension (Phase 3 — implemented)
 
 `gnome-extension/byronscottjones_uictl-linux-mcp@github.com/` — a small GJS
