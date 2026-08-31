@@ -117,7 +117,16 @@ public static class Permissions
     {
         try
         {
-            return Task.Run(() => { probe(); return true; }).Wait(ProbeTimeout);
+            // Task.WaitAny, not task.Wait(timeout) - see
+            // AsyncBridge.RunSync's doc comment for the bug this avoids
+            // (Wait(TimeSpan) rethrows a fast-failing task's exception
+            // wrapped in AggregateException instead of returning false).
+            // Harmless here today only because the catch below is broad
+            // enough to swallow either shape - fixed anyway since this
+            // method is documented in ENGINEERING.md as the reference
+            // pattern for bounding an AT-SPI/D-Bus call.
+            var task = Task.Run(() => probe());
+            return Task.WaitAny([task], ProbeTimeout) != -1 && task.Exception is null;
         }
         catch
         {
