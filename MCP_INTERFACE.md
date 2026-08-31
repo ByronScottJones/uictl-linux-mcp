@@ -417,7 +417,15 @@ Same behavior and redaction rules as macOS/Windows (toast per call, capped
   gives a client no API to position its own top-level window (unlike
   X11/Windows/macOS), so the toast can't pin itself to a screen corner
   the way a native notification would - it appears wherever the
-  compositor places it. Opening the window backfills full history (a
+  compositor places it (confirmed this GNOME/Mutter build doesn't
+  implement `wlr-layer-shell` either, the one protocol that would allow
+  it, via a raw Wayland registry dump). Since this meant a leftover
+  toast could sit in the middle of a `screenshot`/`pixel`/`ocr` capture,
+  `Screenshot.cs` signals the toast to hide for the duration of a
+  Wayland capture (`ToastSuppression.cs`, a polled file flag - the
+  daemon has no other way to reach `uictl-gui`, which only ever connects
+  *to* the daemon, never the reverse) rather than trying to solve
+  positioning. Opening the window backfills full history (a
   one-time unfiltered `__log_list__` call, separate from the ongoing
   poll's own cursor) rather than only showing entries from the moment
   it's opened onward. An "Export" button in the header bar calls

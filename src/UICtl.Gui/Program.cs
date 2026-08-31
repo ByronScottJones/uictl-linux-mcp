@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Adw;
 using Gtk;
+using UICtl.Core;
 using UICtl.Ipc;
 
 namespace UICtl.Gui;
@@ -159,6 +160,11 @@ internal static class Program
     {
         GLib.Functions.TimeoutAdd(0, PollIntervalMs, () =>
         {
+            // A local file check, not routed through the daemon poll below -
+            // checked every tick regardless of whether a poll is already
+            // in flight, so a suppression window doesn't have to wait its
+            // turn behind a slow/overlapping daemon request.
+            _toast?.SetSuppressed(ToastSuppression.IsActive());
             SchedulePoll(app);
             return true; // keep repeating
         });
