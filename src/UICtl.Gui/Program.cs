@@ -213,6 +213,11 @@ internal static class Program
         if (!responseDoc.RootElement.TryGetProperty("data", out var data) || !data.TryGetProperty("entries", out var entries))
             return;
 
+        // Entries arrive in true completion order, never out of order: they
+        // come straight from ActivityLog's insertion order, and
+        // DaemonServer.cs processes one connection/command at a time, so
+        // "recorded" and "completed" are the same event for every entry -
+        // no concurrent completions to reorder.
         JsonElement? latest = null;
         foreach (var entry in entries.EnumerateArray())
         {
@@ -225,7 +230,15 @@ internal static class Program
             ShowOrUpdateToast(app, newest);
     }
 
-    /// <summary>Runs back on the GLib main loop thread (via IdleAdd).</summary>
+    /// <summary>
+    /// Runs back on the GLib main loop thread (via IdleAdd). _pollFailures
+    /// only resets on the *next successful* poll (HandlePollSuccess's first
+    /// line), not immediately on reconnect - if the daemon dies again
+    /// before that next poll lands, the streak keeps counting from where it
+    /// left off rather than restarting. That's intentional: it's a "how
+    /// long has the daemon actually been unreachable" counter, not a
+    /// per-attempt one.
+    /// </summary>
     private static void HandlePollFailure(Adw.Application app)
     {
         if (++_pollFailures >= MaxConsecutivePollFailures)

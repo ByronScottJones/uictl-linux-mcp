@@ -26,9 +26,12 @@ namespace UICtl.Gui;
 /// </summary>
 internal sealed class LogWindow
 {
+    private const string PlaceholderText = "No activity yet.\n";
+
     private readonly Adw.Window _window;
     private readonly Gtk.TextView _textView;
     private readonly Gtk.TextBuffer _buffer;
+    private bool _hasEntries;
 
     public LogWindow(Adw.Application app)
     {
@@ -50,6 +53,7 @@ internal sealed class LogWindow
         headerBar.PackEnd(exportButton);
 
         _buffer = Gtk.TextBuffer.New(null);
+        _buffer.SetText(PlaceholderText, PlaceholderText.Length); // cleared on the first real AppendEntry
         _textView = Gtk.TextView.NewWithBuffer(_buffer);
         _textView.SetEditable(false);
         _textView.SetCursorVisible(false);
@@ -112,6 +116,12 @@ internal sealed class LogWindow
         string line = $"{timestamp}  {(success ? "OK " : "ERR")}  {command,-24} {durationMs,7:F0}ms{error}\n"
                      + $"    params: {paramsJson}\n"
                      + $"    result: {resultJson}\n";
+
+        if (!_hasEntries)
+        {
+            _hasEntries = true;
+            _buffer.SetText("", 0); // drop the "No activity yet" placeholder
+        }
 
         _buffer.GetEndIter(out Gtk.TextIter end);
         _buffer.Insert(end, line, line.Length);

@@ -106,6 +106,21 @@ may genuinely want to wait longer for a correct answer rather than fail
 fast, so a blanket timeout on the underlying methods could be the wrong
 call for those specific callers.
 
+**Caveat on the `Permissions.cs` fix itself** (raised in PR #10 review):
+"bounds the wait, not the call" means a timed-out probe's orphaned task
+keeps running the real D-Bus call to completion in the background. Fine
+for an *occasional* slow probe (one extra background task, gone within
+seconds). Under *sustained* slowness (GNOME Shell consistently >3s for
+minutes at a stretch) while something polls `permissions.status`
+frequently, these orphaned tasks would accumulate - each stuck on its own
+thread-pool thread until GNOME Shell eventually answers. `uictl-gui`'s
+own poll loop doesn't call `permissions.status` (only `__log_list__`), so
+this needs a caller that repeatedly polls `permissions` specifically
+(scripted, or an agent in a loop) to actually manifest, and hasn't been
+observed live. If it ever is: the fix is a `SemaphoreSlim`-style cap on
+concurrently in-flight probes per probe type, not a shorter timeout
+(which wouldn't stop them from stacking up, just make each one smaller).
+
 ## CPU architecture (x86_64/arm64)
 
 The project has no build-level architecture restriction (no
