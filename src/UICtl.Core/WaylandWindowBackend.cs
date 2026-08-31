@@ -16,7 +16,7 @@ internal sealed class WaylandWindowBackend : IWindowBackend
     private const string ServiceName = "org.byronscottjones.uictl.WindowManager";
     private static readonly ObjectPath ServicePath = "/org/byronscottjones/uictl/WindowManager";
 
-    private static readonly Lazy<Connection> LazyConnection = new(() => AsyncBridge.RunSync(ConnectAsync));
+    private static readonly Lazy<Connection> LazyConnection = new(() => AsyncBridge.RunSync(ConnectAsync, AsyncBridge.DefaultDBusTimeout));
 
     private static async Task<Connection> ConnectAsync()
     {
@@ -36,9 +36,9 @@ internal sealed class WaylandWindowBackend : IWindowBackend
         return (IReadOnlyList<BackendWindow>)windows
             .Select(w => new BackendWindow(w.Item1, w.Item2, w.Item3, new Frame(w.Item4, w.Item5, w.Item6, w.Item7)))
             .ToList();
-    });
+    }, AsyncBridge.DefaultDBusTimeout);
 
-    public bool Activate(long id) => AsyncBridge.RunSync(() => GuardedCallAsync(() => Proxy.ActivateWindowAsync((uint)id)));
+    public bool Activate(long id) => AsyncBridge.RunSync(() => GuardedCallAsync(() => Proxy.ActivateWindowAsync((uint)id)), AsyncBridge.DefaultDBusTimeout);
 
     public BackendWindow? GetFocusedWindow() => AsyncBridge.RunSync(async () =>
     {
@@ -54,7 +54,7 @@ internal sealed class WaylandWindowBackend : IWindowBackend
             if (w.Item1 == stableSeq)
                 return new BackendWindow(w.Item1, w.Item2, w.Item3, new Frame(w.Item4, w.Item5, w.Item6, w.Item7));
         return null;
-    });
+    }, AsyncBridge.DefaultDBusTimeout);
 
     /// <summary>
     /// A D-Bus call to a service name nobody owns throws Tmds.DBus's own

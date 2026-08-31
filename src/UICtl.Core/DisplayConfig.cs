@@ -14,7 +14,7 @@ public static class DisplayConfig
     private const string ServiceName = "org.gnome.Mutter.DisplayConfig";
     private static readonly ObjectPath ServicePath = "/org/gnome/Mutter/DisplayConfig";
 
-    private static readonly Lazy<Connection> LazyConnection = new(() => AsyncBridge.RunSync(ConnectAsync));
+    private static readonly Lazy<Connection> LazyConnection = new(() => AsyncBridge.RunSync(ConnectAsync, AsyncBridge.DefaultDBusTimeout));
 
     private static async Task<Connection> ConnectAsync()
     {
@@ -74,7 +74,7 @@ public static class DisplayConfig
             index++;
         }
         return (IReadOnlyList<DisplayInfo>)result;
-    });
+    }, AsyncBridge.DefaultDBusTimeout);
 
     /// <summary>
     /// Mutter's D-Bus API identifies monitors by connector name string

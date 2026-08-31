@@ -15,7 +15,7 @@ public static class Accessibility
     private const string RegistryService = "org.a11y.atspi.Registry";
     private static readonly ObjectPath RootPath = "/org/a11y/atspi/accessible/root";
 
-    private static readonly Lazy<Connection> LazyConnection = new(() => AsyncBridge.RunSync(ConnectAsync));
+    private static readonly Lazy<Connection> LazyConnection = new(() => AsyncBridge.RunSync(ConnectAsync, AsyncBridge.DefaultDBusTimeout));
 
     private static async Task<Connection> ConnectAsync()
     {
@@ -64,7 +64,7 @@ public static class Accessibility
 
     public static IReadOnlyList<AppInfo> ListApps(bool includeBackground)
     {
-        var atspiApps = AsyncBridge.RunSync(ListAtspiAppsAsync);
+        var atspiApps = AsyncBridge.RunSync(ListAtspiAppsAsync, AsyncBridge.DefaultDBusTimeout);
         // TryAdd, not ToDictionary: two AT-SPI accessibles can share a pid
         // (a process registering more than one root accessible) - a
         // straight ToDictionary throws on the duplicate key and would take
@@ -137,7 +137,7 @@ public static class Accessibility
 
     public static IReadOnlyList<WindowInfo> ListWindows(int? pidFilter)
     {
-        var windows = AsyncBridge.RunSync(() => ListWindowsInnerAsync(pidFilter));
+        var windows = AsyncBridge.RunSync(() => ListWindowsInnerAsync(pidFilter), AsyncBridge.DefaultDBusTimeout);
         foreach (var (info, busName, path) in windows)
             WindowStore.Register(info.WindowId, busName, path);
         return windows.Select(w => w.Info).ToList();
@@ -210,7 +210,7 @@ public static class Accessibility
     public static ElementWalkResult WalkWindow(long windowId, ElementWalkOptions options)
     {
         var (busName, path) = WindowStore.Resolve(windowId);
-        return AsyncBridge.RunSync(() => WalkInnerAsync(busName, path, windowId, options));
+        return AsyncBridge.RunSync(() => WalkInnerAsync(busName, path, windowId, options), AsyncBridge.DefaultDBusTimeout);
     }
 
     public static string SetElementText(string elementId, string text)
@@ -220,7 +220,7 @@ public static class Accessibility
         {
             var editable = Conn.CreateProxy<IAtspiEditableText>(busName, path);
             return await editable.SetTextContentsAsync(text);
-        });
+        }, AsyncBridge.DefaultDBusTimeout);
         if (ok) return "atspiValue";
 
         // EditableText isn't implemented/didn't take - fall back to
@@ -245,6 +245,6 @@ public static class Accessibility
             if (w <= 0 || h <= 0 || w >= 100_000 || h >= 100_000)
                 throw new UiCtlException($"element {elementId} has no usable on-screen geometry (not currently visible/laid out?)");
             return new Frame(x, y, w, h);
-        });
+        }, AsyncBridge.DefaultDBusTimeout);
     }
 }
