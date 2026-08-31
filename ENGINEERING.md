@@ -69,42 +69,62 @@ connections to AT-SPI's registry and the Shell extension.
 | clipboard | **Implemented** (Phase 4, `Clipboard.cs`). Shell out to `wl-copy`/`wl-paste` (Wayland) or `xclip` (X11), selected by the same session-type detection as windows. `wl-copy`/`xclip` (setting) fork into the background to keep serving the clipboard after the invoked process exits, on success only - live-verified the hard way: draining that process's stdout/stderr past its own exit waits on the forked child's inherited pipe and never returns, so `Clipboard.cs` skips reading output entirely on a successful set rather than trying to bound the wait. `wl-paste` also always appends a trailing newline regardless of what was actually copied (confirmed live) - `--no-newline` is required for byte-exact round-tripping; `xclip -o` needs no equivalent. Native-protocol implementation is a possible follow-up if shelling out proves fragile. |
 | wait-for | **Implemented** (Phase 4, `WaitFor.cs`). Polls `Accessibility.WalkWindow` (the same call `elements` makes) every 250ms until an element matches `--role`/`--title`, or `--timeout` (default 5s) elapses - no new AT-SPI surface needed. Re-resolves the window/app fresh on every poll rather than once up front, so it also covers "wait for this app to even launch": a resolution failure mid-poll (app not running yet) is treated as "not found yet" and retried, not a hard error - only a missing window *and* app selector fails immediately, since no amount of polling could ever fix that. |
 | feedback | **Implemented** (Phase 5, `FeedbackStore.cs`/`FeedbackGitHub.cs`). Local-first CRUD (`~/.uictl/feedback.json`, monotonically increasing ids never reused) - `create`/`list`/`get`/`update`/`delete` never touch the network. `checkDuplicates`/`submit` search GitHub's Search Issues API (best-effort free-text match on the draft's title, not exact-match dedup) via `HttpClient`, token resolved `--token`/`token` param → `$GITHUB_TOKEN` → shelling out to `gh auth token`. `submit` never files anything via the API - it only opens a pre-filled "new issue" page (`xdg-open`) for a human to review and click "Create" themselves; uictl has no way to learn whether they actually did, so there's no "submitted" flag anywhere - a human deletes the local draft once they've filed it for real. |
-| activity log | **Implemented** (Phase 5, `Ipc/ActivityLog.cs` + `UICtl.Gui`). An in-memory queue capped at ~2000 entries, populated from `CommandDispatcher.Dispatch` itself (one hook point, not per-command wiring) - every command except double-underscore-prefixed daemon lifecycle ones (`__ping__`, `__log_list__`, `__gate_set__`) is recorded with its params, result, success/failure, and duration. Redaction is narrow and exact, matching MCP_INTERFACE.md: `text` is replaced only in `type`'s/`clipboard.set`'s params and `clipboard.get`'s result - `ocr`/`elements`/`screenshot` output is deliberately left alone. `log.export` dumps the current queue to JSON. `log.show` opens `uictl-gui` (Gir.Core, this project's first use of GTK4/libadwaita) - a persistent toast (updates and resets a 5s fade timer on every new command, distinct from a native desktop notification - see its own doc comment for why) plus an on-demand text-based activity window hosting the "commands-enabled" kill switch. `uictl-gui` is a single GApplication instance across its whole lifetime - a second `uictl-gui`/`uictl-gui --show-log` invocation registers, discovers `IsRemote`, forwards via a named GAction (`show-log`), and exits in ~0.3s rather than starting redundant work (confirmed live). Every `DaemonClient.Send` call in `UICtl.Gui` runs on a background thread with results marshaled back via `GLib.Functions.IdleAdd` - calling it directly from a GTK event handler or timeout callback blocks the whole window on any slow daemon response, confirmed live twice (the poll loop, then separately the kill-switch checkbox) as a real, user-visible freeze severe enough to need a force-quit, not a theoretical concern. See "Known daemon reliability gap" below for the pre-existing, still-open issue that made this fix necessary in the first place. |
-| permissions.status | **Implemented** (Phase 2, `Permissions.cs`): `{"sessionType": "x11"|"wayland", "inputMethod": "uinput"|"xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool \| null, "interactive": bool}`. `inputMethod` always reports `"uinput"` for now (XTest isn't built, so there's nothing to choose between yet). `shellExtensionConnected` is always `false` on Wayland until the companion extension exists (Phase 3). Its two probes (`TryProbeAtspi`/`TryProbeShellExtension`) are bounded to a 3s timeout and a 5-minute success-only cache (Phase 5 addition) - see "Known daemon reliability gap" below for why. |
+| activity log | **Implemented** (Phase 5, `Ipc/ActivityLog.cs` + `UICtl.Gui`). An in-memory queue capped at ~2000 entries, populated from `CommandDispatcher.Dispatch` itself (one hook point, not per-command wiring) - every command except double-underscore-prefixed daemon lifecycle ones (`__ping__`, `__log_list__`, `__gate_set__`) is recorded with its params, result, success/failure, and duration. Redaction is narrow and exact, matching MCP_INTERFACE.md: `text` is replaced only in `type`'s/`clipboard.set`'s params and `clipboard.get`'s result - `ocr`/`elements`/`screenshot` output is deliberately left alone. `log.export` dumps the current queue to JSON. `log.show` opens `uictl-gui` (Gir.Core, this project's first use of GTK4/libadwaita) - a persistent toast (updates and resets a 5s fade timer on every new command, distinct from a native desktop notification - see its own doc comment for why) plus an on-demand text-based activity window hosting the "commands-enabled" kill switch. `uictl-gui` is a single GApplication instance across its whole lifetime - a second `uictl-gui`/`uictl-gui --show-log` invocation registers, discovers `IsRemote`, forwards via a named GAction (`show-log`), and exits in ~0.3s rather than starting redundant work (confirmed live). Every `DaemonClient.Send` call in `UICtl.Gui` runs on a background thread with results marshaled back via `GLib.Functions.IdleAdd` - calling it directly from a GTK event handler or timeout callback blocks the whole window on any slow daemon response, confirmed live twice (the poll loop, then separately the kill-switch checkbox) as a real, user-visible freeze severe enough to need a force-quit, not a theoretical concern. See "Daemon reliability: AT-SPI/D-Bus call timeouts" below for the pre-existing issue that made this fix necessary in the first place (fixed everywhere else in a later follow-up audit). |
+| permissions.status | **Implemented** (Phase 2, `Permissions.cs`): `{"sessionType": "x11"|"wayland", "inputMethod": "uinput"|"xtest", "uinputWritable": bool, "atspiEnabled": bool, "shellExtensionConnected": bool \| null, "interactive": bool}`. `inputMethod` always reports `"uinput"` for now (XTest isn't built, so there's nothing to choose between yet). `shellExtensionConnected` is always `false` on Wayland until the companion extension exists (Phase 3). Its two probes (`TryProbeAtspi`/`TryProbeShellExtension`) are bounded to a 3s timeout and a 5-minute success-only cache (Phase 5 addition) - see "Daemon reliability: AT-SPI/D-Bus call timeouts" below for why, including why this stayed a separate, shorter bound rather than folding into the later 60s fix applied everywhere else. |
 
-## Known daemon reliability gap (AT-SPI/D-Bus calls have no timeout)
+## Daemon reliability: AT-SPI/D-Bus call timeouts (audited/fixed 2026-08-31)
 
 Found while building Phase 5's `log show`/toast, not caused by it:
-**no AT-SPI or D-Bus call anywhere in this codebase has a client-side
-timeout**, and `DaemonServer.cs` processes one connection at a time by
-design. If GNOME Shell's own D-Bus service is ever slow to answer
-(confirmed live: one call took ~48s, cause not diagnosed - outside this
-project's control), that single call blocks *every other command from
-every other client* for the same duration - not just the one that
-triggered it. From the outside this looks exactly like the whole daemon
-hanging.
+**no AT-SPI or D-Bus call anywhere in this codebase ever had a
+client-side timeout**, and `DaemonServer.cs` processes one connection at
+a time by design. If GNOME Shell's own D-Bus service is ever slow to
+answer (confirmed live: one call took ~48s, cause not diagnosed -
+outside this project's control), that single call blocks *every other
+command from every other client* for the same duration - not just the
+one that triggered it. From the outside this looks exactly like the
+whole daemon hanging.
 
-`Permissions.cs`'s two probes were fixed (bounded wait via
-`Task.Run(...).Wait(timeout)` - Tmds.DBus has no cancellation for an
-in-flight call, so this bounds the *wait*, not the call itself; the
-orphaned task finishes on its own thread-pool thread later, harmlessly -
-plus a 5-minute cache on success only, so normal use rarely even reaches
-the D-Bus round trip). **`windows.list`'s own AT-SPI element walk
-(`Accessibility.cs`, Phase 1) is confirmed to hang the same way and is
-NOT fixed** - proving the gap is systemic across every AT-SPI/D-Bus call
-site (`Accessibility.cs`, `WaylandWindowBackend.cs`, `DisplayConfig.cs`,
-`WaylandScreenshotBackend.cs`), not specific to the two probes that
-happened to get exercised first. Deliberately not fixed everywhere in
-this same change - that's a full audit of every call site, decided to
-track as a separate follow-up rather than block Phase 5 on it.
+**Fixed in a follow-up audit** (`Permissions.cs`'s two probes were fixed
+first, in the same PR as `log show` - see below for why those needed a
+different, shorter bound): `AsyncBridge.RunSync` (`src/UICtl.Core/
+AsyncBridge.cs`), the shared sync-over-async bridge every AT-SPI/D-Bus
+call in this codebase already went through, gained an opt-in `TimeSpan?
+timeout` parameter (`null` default = unbounded, the original behavior).
+Every real AT-SPI/D-Bus call site now passes `AsyncBridge.
+DefaultDBusTimeout` (60s - well above the one confirmed-live ~48s case,
+so this essentially never fires under legitimate slowness, only bounds
+the absolute worst case to something finite instead of forever):
+`Accessibility.cs` (`ListApps`/`ListWindows`/`WalkWindow`/
+`SetElementText`/`GetElementFrame`, plus its own lazy AT-SPI bus
+connect), `WaylandWindowBackend.cs` (`ListWindows`/`Activate`/
+`GetFocusedWindow`, plus its lazy Shell-extension connect), and
+`DisplayConfig.cs` (`List`, plus its lazy Mutter connect) - i.e. every
+call site named as unfixed in the original version of this section.
+`windows.list`'s hang (the specific case confirmed live at the time) is
+now bounded by this.
 
-The `Permissions.cs` fix is the reference pattern for that follow-up:
-bound the wait at each call site with `Task.Run(...).Wait(timeout)`, not
-deeper inside `Accessibility.cs`/`WaylandWindowBackend.cs` themselves -
-some legitimate callers (the real `apps.list`/`windows.list` listings)
-may genuinely want to wait longer for a correct answer rather than fail
-fast, so a blanket timeout on the underlying methods could be the wrong
-call for those specific callers.
+**`WaylandScreenshotBackend.cs` deliberately excluded** - its dominant
+wait isn't GNOME Shell being slow, it's a human deciding whether to click
+"Allow" on the portal's consent dialog, already bounded by its own
+explicit `Task.WhenAny(..., Task.Delay(TimeSpan.FromMinutes(2)))` (a
+genuinely different, much longer, human-paced wait that a uniform 60s
+AT-SPI/D-Bus bound would wrongly cut short). The narrower gap that
+remains there - the initial portal connect/register/`ScreenshotAsync`
+call itself hanging, before that 2-minute wait even starts - is lower
+risk (a different D-Bus service than the one confirmed slow) and not
+fixed here.
+
+**Why `Permissions.cs`'s two probes stayed on their own separate,
+shorter 3s bound** rather than switching to the new 60s
+`AsyncBridge.DefaultDBusTimeout`: a probe's whole job is "can I reach X
+right now", a fast yes/no a human/GUI is waiting on synchronously
+(`permissions.status`) - it should fail fast, not wait out a legitimate
+but slow 48s answer the way `windows.list` should. Both bounds are now
+real, coexisting `AsyncBridge.RunSync` timeout parameters used for
+different purposes at different layers (`Permissions.cs` wraps its own
+outer `Task.Run(...).Wait(3s)` around calls into `Accessibility.cs`/
+`WaylandWindowBackend.cs`, which now *also* carry the inner 60s bound -
+the outer, shorter one fires first in practice).
 
 **Caveat on the `Permissions.cs` fix itself** (raised in PR #10 review):
 "bounds the wait, not the call" means a timed-out probe's orphaned task
@@ -399,9 +419,10 @@ done — `feedback.*` (`FeedbackStore.cs`/`FeedbackGitHub.cs`), the activity
 log's data/redaction/export (`ActivityLog.cs`), and `log.show`'s GTK4/
 libadwaita toast + activity window with the commands-enabled kill switch
 (`UICtl.Gui`, this project's first use of that toolkit) are all
-implemented and live-verified; see "Known daemon reliability gap" above
-for a real, pre-existing issue found and partially fixed along the way,
-tracked as a follow-up rather than blocking this phase)**,
+implemented and live-verified; see "Daemon reliability: AT-SPI/D-Bus call
+timeouts" above for a real, pre-existing issue found along the way -
+`Permissions.cs`'s two probes were fixed in this same phase, the rest of
+the call sites in a later follow-up audit, now also done)**,
 tests/docs/contract sync). Development runs directly against a real GNOME/Mutter desktop
 session (not WSL/WSLg, which only runs a lightweight `weston` compositor —
 window enumeration/activation on Wayland, the Shell extension, portal

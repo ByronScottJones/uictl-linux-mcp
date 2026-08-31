@@ -59,10 +59,15 @@ public static class Permissions
     /// connection at a time, that single slow probe blocked *every* other
     /// command, including totally unrelated ones, for the same ~48s. A
     /// diagnostic "can I reach X" check should fail fast, not stall the
-    /// whole daemon waiting for an answer nobody's holding out for -
-    /// `apps.list`/`windows.list` (the real listing operations) stay
-    /// unbounded, since those callers *do* want to wait for a correct
-    /// answer rather than a fast possibly-wrong one.
+    /// whole daemon waiting for an answer nobody's holding out for - a much
+    /// shorter, probe-specific bound than `AsyncBridge.DefaultDBusTimeout`
+    /// (the 60s ceiling every real AT-SPI/D-Bus call - `apps.list`/
+    /// `windows.list`/etc. - now has too, added later in the same
+    /// investigation; see ENGINEERING.md's "Daemon reliability: AT-SPI/D-Bus call timeouts").
+    /// Those callers still want to wait out a real, if slow, answer rather
+    /// than fail fast the way a probe should - this is a separate, shorter
+    /// bound layered on top for exactly that different purpose, not a
+    /// replacement for it.
     /// </summary>
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
 
