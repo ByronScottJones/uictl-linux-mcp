@@ -61,7 +61,7 @@ connections to AT-SPI's registry and the Shell extension.
 | windows.list | Primarily AT-SPI (see above) for any app that registers — title, frame, role. Fall back to the `IWindowBackend` split below only to catch windows AT-SPI doesn't know about (an app that doesn't implement the AT-SPI/ATK bridge) or to fill in `displayId`/pid-to-window correlation gaps. |
 | activate / focus | **Implemented** (Phase 3: `IWindowBackend.cs`/`WindowActivation.cs`/`FocusHoldStore.cs`). AT-SPI has no general activation primitive (`GrabFocus` unsupported in practice) — this is the one area gated on `IWindowBackend`, chosen at runtime by `SessionDetection` (`$WAYLAND_DISPLAY` first, `$DISPLAY` second — `$XDG_SESSION_TYPE` observed unset in this environment, don't rely on it alone). **X11 backend** (`X11WindowBackend.cs`): direct Xlib P/Invoke against EWMH (`_NET_CLIENT_LIST`/`_NET_WM_PID`/`_NET_WM_NAME`/`_NET_ACTIVE_WINDOW`) — live-verified against a `GDK_BACKEND=x11`-forced app on this Wayland machine's XWayland (the best available approximation without a genuine X11 session; a daemon spawned with `$WAYLAND_DISPLAY` unset correctly falls back to this backend). One real Xlib gotcha, easy to get wrong: `XGetWindowProperty` returns a format-32 property (Window/CARDINAL values) as an array of native `long` (8 bytes on x86_64), not 4-byte `int32`, regardless of the logical 32-bit value it holds. **Wayland/GNOME backend** (`WaylandWindowBackend.cs`): D-Bus calls to the companion Shell extension (`gnome-extension/`, see below) — the backend that matters for a typical modern GNOME app, since most GTK apps run as native Wayland clients even on a real GNOME/Xorg-available desktop (confirmed in Phase 1: default-launched `gnome-text-editor` invisible to X11 entirely). `windows.list` stays 100% AT-SPI-based, unchanged — `IWindowBackend` is used *only* for activation, correlated to AT-SPI's own windowId scheme by pid (see `MCP_INTERFACE.md`'s "Window id" section for why these are deliberately separate id spaces). |
 | displays.list | **Implemented** (Phase 4: `DisplayConfig.cs`). Not X11-RandR-vs-Wayland-split as originally planned below — `org.gnome.Mutter.DisplayConfig` turned out to answer for **both** session types (Mutter is the compositor/WM either way, exposing this for `gnome-control-center`'s own display panel regardless of X11/Wayland), so one D-Bus code path covers both, no XRandR P/Invoke needed. `logicalMonitors`' x/y/scale is Mutter's own global "logical" coordinate space — width/height aren't given directly, derived from the matching physical monitor's current mode divided by that scale. `displayId` is an opaque hash of Mutter's connector-name string (e.g. "Virtual-1") — Mutter's API has no raw XID-equivalent even on an X11 session, unlike RandR's RROutput. |
-| screenshot | **Implemented** (Phase 4: `Screenshot.cs`/`X11ScreenCapture.cs`/`WaylandScreenshotBackend.cs`). X11: `XGetImage` (32bpp TrueColor only — confirmed universal on this class of machine, throws naming the bpp otherwise), no permission prompt, live-verified against a `GDK_BACKEND=x11`-forced window. Wayland: `org.freedesktop.portal.Screenshot` — see "Wayland screenshot" section below for what this actually took to get working and its real, unresolved limitation (a consent dialog on **every** call, not just the first). PNG encode/decode is hand-rolled (`Interop/PngCodec.cs`) rather than a new dependency — see its own doc comment. |
+| screenshot | **Implemented** (Phase 4: `Screenshot.cs`/`X11ScreenCapture.cs`/`WaylandScreenshotBackend.cs`; ScreenCast+PipeWire follow-up below). X11: `XGetImage` (32bpp TrueColor only — confirmed universal on this class of machine, throws naming the bpp otherwise), no permission prompt, live-verified against a `GDK_BACKEND=x11`-forced window. Wayland: tries `org.freedesktop.portal.ScreenCast`+PipeWire first (`WaylandScreenCastCapture.cs`, isolated in its own `uictl-screencapture` process — zero-dialog once a grant exists), falling back to `org.freedesktop.portal.Screenshot` (a consent dialog on **every** call) if that's unavailable or fails — see "Wayland screenshot" section below for the full story on both. PNG encode/decode is hand-rolled (`Interop/PngCodec.cs`) rather than a new dependency — see its own doc comment. |
 | pixel | **Implemented** (Phase 4: `Pixel.cs`). X11: `XGetImage` of a 1x1 region via the same code screenshot uses. Wayland: samples a full portal screenshot — see MCP_INTERFACE.md, this is genuinely expensive here (full capture + consent dialog per call), not a cheap primitive. |
 | input synthesis | **Implemented** (Phase 2): `/dev/uinput` virtual keyboard+mouse device via P/Invoke `ioctl`/`write` — kernel-level, identical under X11 and Wayland (no `IWindowBackend` split needed, unlike windowing), no per-call dialog. One long-lived absolute-pointer+keyboard device, created once and cached for the daemon's lifetime (`UinputDevice.cs`), ranged to the real X11/XWayland screen pixel size (`Interop/XlibScreenInterop.cs`) rather than a normalized virtual range — see "Coordinate spaces" below. Needs one-time device-permission setup: group membership alone is **not** sufficient on a stock Ubuntu 26.04 install (confirmed live: `/dev/uinput` ships `root:root` mode `0600` with no group grant at all) — a udev rule is also required, see README's Input setup section. Text/key synthesis is US-QWERTY/ASCII-only (`KeyCodes.cs` — `uinput` codes are physical-key codes, not Unicode input); an unsupported character throws rather than silently dropping. XTest remains a documented, not-yet-built zero-setup alternative for a confirmed-X11 session. |
 | OCR | **Implemented** (Phase 4, `Ocr.cs`/`TesseractEngine.cs`/`Interop/TesseractInterop.cs`). **Tesseract**, via hand-rolled P/Invoke against the system libtesseract (`tesseract-ocr`/`tesseract-ocr-eng`, already in `scripts/preflight.sh`) — not the `Tesseract` NuGet package: that package's managed assembly P/Invokes fixed Windows DLL names ("tesseract50", "leptonica-1.82.0") and ships only Windows-native `.dll` binaries, no Linux `.so` at all, confirmed via `strings` on the assembly — it cannot resolve to this machine's installed native libs on any Linux distro. A `NativeLibrary.SetDllImportResolver` hook tries `libtesseract.so.5` then `.so.4` (older LTS releases' `tesseract-ocr` package resolves to Tesseract 4.x) rather than pinning one SONAME the way `libX11.so.6` is pinned elsewhere in this codebase — only `.so.5` is live-verified (no 4.x machine available). `TessBaseAPISetImage` takes a raw RGBA buffer directly, so this needs zero Leptonica/Pix P/Invoke of its own despite Tesseract linking against liblept internally. Reuses `screenshot`'s exact capture pipeline (`Screenshot.CaptureFrame`/`WholeScreenFrame`) for the window/app/whole-screen/region cases, so it inherits the same X11-instant-vs-Wayland-real-consent-dialog-every-call split — see "Wayland screenshot" below. `region` is always an absolute screen-space rectangle, applied as a further crop on top of whatever window/app/whole-screen was captured. One text block per Tesseract text line (`RIL_TEXTLINE`), frame from `TessPageIteratorBoundingBox` (already the union of that line's word boxes, matching MCP_INTERFACE.md's documented contract), confidence normalized from Tesseract's native 0–100 scale to 0–1 — real per-line confidence, unlike Windows' always-`null`, closer to macOS's Vision output. Fully local, no network. The engine handle is cached for the daemon's lifetime (`TesseractEngine.cs`, same rationale as `UinputDevice.cs`'s cached device) since `TessBaseAPIInit3` loading the trained-data model isn't free — safe with no locking since `DaemonServer.cs` handles one connection at a time. |
@@ -291,19 +291,20 @@ baked into `WaylandScreenshotBackend.cs`:
    silent-repeat path; treat "every call needs a click" as the behavior to
    design and document against).
 
-**Deliberately deferred, not attempted this pass:** `org.freedesktop.portal.ScreenCast`
-+ PipeWire is the actual "one-time consent, then silent repeat capture"
-mechanism GNOME apps use (a `restore_token` skips the picker on later
-session creation) — this is the real fix for the per-call dialog above,
-matching macOS's one-time Screen Recording grant the way the original
-plan for this row intended. Not built here: it needs a live PipeWire
-stream negotiation (SPA format/buffer negotiation, frame pulling) via
-P/Invoke against `libpipewire` — no .NET binding exists for this, and
-it's a substantially larger and riskier body of work than the rest of
-Phase 4. Revisit as its own follow-up phase once screenshot's current
-click-per-call behavior is confirmed to actually be a problem in
-practice (it may be fine for supervised/manual use and only matter for
-tight unattended automation loops).
+**Built as a follow-up (2026-08-31), no longer deferred:**
+`org.freedesktop.portal.ScreenCast` + PipeWire is the actual "one-time
+consent, then silent repeat capture" mechanism GNOME apps use (a
+`restore_token` skips the picker on later session creation) — the real
+fix for the per-call dialog above, matching macOS's one-time Screen
+Recording grant the way the original plan for this row intended. Needed
+a live PipeWire stream negotiation (SPA format/buffer negotiation, frame
+pulling) via P/Invoke against `libpipewire` — no .NET binding exists for
+this, confirmed a substantially larger and riskier body of work than the
+rest of Phase 4, and isolated into its own process
+(`src/UICtl.ScreenCapture`) rather than run in the daemon for exactly
+that reason. See the dedicated writeup below for the full story
+(live-verified working, plus three real gotchas found and fixed/worked
+around along the way).
 
 **Investigated 2026-08-31, blocked by an upstream binding bug, not a
 GNOME limitation:** a real `parent_window` handle (instead of the empty
@@ -370,12 +371,81 @@ every other portal result in this codebase has needed so far - confirmed
 live via the exact `InvalidCastException` naming the actual runtime
 type; fixed by casting to the correct ValueTuple array type directly.
 
-**Not yet built**: the PipeWire side (`node_id`/fd -> an actual decoded
-frame -> PNG). This is the harder, riskier remaining piece the original
-"substantially larger and riskier" assessment was mainly about - hand-
-rolled P/Invoke against `libpipewire-0.3.so.0` (confirmed installed,
-v1.6.2, no .NET binding exists), including SPA POD format negotiation
-and a native `process` callback for buffer delivery. In progress.
+**PipeWire capture: done, live-verified working end-to-end.** The
+`node_id`/fd → decoded frame → PNG piece runs entirely in its own
+process, `src/UICtl.ScreenCapture` (`uictl-screencapture <output-path>`),
+never in the daemon - see that project's `Program.cs` doc comment for
+why: hand-rolled P/Invoke against `libpipewire-0.3.so.0` (confirmed
+installed, v1.6.2, no .NET binding exists for PipeWire) with function-
+pointer native callbacks and manually-encoded/decoded binary SPA POD
+structures is genuinely risky, unproven interop where a wrong struct
+offset is a segfault, not a catchable .NET exception - isolating it
+means a crash only fails *that* capture attempt, not the whole daemon.
+`Screenshot.cs`'s Wayland path (`WaylandScreenCastCapture.cs`) spawns
+this helper with a 20s timeout and falls back to
+`WaylandScreenshotBackend.cs`'s proven per-call-dialog path on any
+failure - not found, non-zero exit, timeout, or crash.
+
+Struct layouts and enum values (`SpaPod.cs`'s `SpaType`/`SpaChoiceType`/
+`SpaParamType`/`SpaFormatKey`/`SpaMediaType`/`SpaMediaSubtype`/
+`SpaVideoFormat`; `PipeWireCapture.cs`'s `pw_stream_events`/`spa_buffer`/
+`spa_data`/`spa_chunk`/`pw_buffer`) were transcribed from PipeWire
+1.6.2's real C headers (fetched directly from the PipeWire GitHub repo
+at the exact installed version), not guessed from memory - verified
+against a hand-derived expected byte sequence for a few representative
+PODs before ever touching live PipeWire, which caught nothing (the
+encoder was correct on the first try), but the live native layer needed
+real iteration to get working:
+
+1. **`param_changed` never fires with `id=SPA_PARAM_Format`** for this
+   screencast node, even though the stream reaches `PW_STREAM_STATE_PAUSED`
+   (meaning format negotiation *did* succeed at the SPA level) - only
+   `SPA_PARAM_Props` reliably fires. Worked around, not root-caused:
+   `BuildEnumFormatParam` requests a single *fixed* format (BGRx) instead
+   of offering several alternatives via a Choice, so there's nothing to
+   read back; `OnProcess` derives width/height from the delivered
+   buffer's own `spa_chunk.stride`/`size` instead of a pre-negotiated
+   value. `SpaPodReader.cs` (a POD-property reader, written to parse the
+   never-firing event) was written and then deleted once this made it
+   unnecessary - it's in git history if a future format-choice attempt
+   needs it again.
+2. **The stream reached `PAUSED` but never `STREAMING`** until
+   `PW_STREAM_FLAG_AUTOCONNECT` was added to `pw_stream_connect`'s flags
+   (alongside `MAP_BUFFERS`) - `pw-dump` showed the stream's own node
+   existed but sat `suspended` with no `Link` ever created to the actual
+   screencast source, even though a valid `target_id` (the portal's
+   `node_id`) was passed. The portal's own documented usage is exactly
+   this: pass `node_id` as `pw_stream_connect`'s raw `target_id`
+   parameter (not the newer `target.object` property, which wants a name
+   or `object.serial`, not a plain node id) - but AUTOCONNECT turned out
+   to still be required for wireplumber to actually perform the link.
+3. **A live, real false alarm, root-caused, not just worked around**:
+   mid-development every `cursor_mode` value started failing with
+   `org.freedesktop.portal.Error.InvalidArgument: Unavailable cursor mode
+   N`, including values confirmed working minutes earlier, and restarting
+   `xdg-desktop-portal-gnome.service` (the GNOME backend) didn't fix it.
+   `busctl --user get-property org.freedesktop.portal.Desktop
+   /org/freedesktop/portal/desktop org.freedesktop.portal.ScreenCast
+   AvailableCursorModes` showed `0` (no modes available at all) even on a
+   fresh backend instance - the actual cause was
+   `xdg-desktop-portal.service` (the *main dispatcher*, not the backend,
+   running since login rather than since the backend's crash/respawn)
+   caching a stale zeroed value. Restarting the dispatcher itself
+   restored `AvailableCursorModes=7`, and the unmodified capture code
+   then worked again. Root cause: rapid repeated session creation/
+   teardown during testing (including killed/timed-out helper processes
+   that never got to call `Session.Close()`) crashed the GNOME backend at
+   least once; a normal desktop session shouldn't hit this from real
+   usage, but if "Unavailable cursor/source mode N" ever recurs, check
+   the dispatcher's cached properties via `busctl` before assuming the
+   code regressed.
+
+Live-verified repeatedly end-to-end (`uictl screenshot` through the real
+daemon, not just the standalone helper): silent (no dialog) captures in
+~1s once a grant exists, correct RGBA→PNG color conversion confirmed by
+eye (a real screenshot of the desktop, not garbage/inverted-channel
+pixels), and the dialog-based fallback confirmed to still work correctly
+when the helper binary is unavailable.
 
 ## GNOME Shell extension (Phase 3 — implemented)
 

@@ -96,7 +96,11 @@ public static class Screenshot
 
     private static byte[] CaptureWaylandCropped(Frame captureFrame, int width, int height)
     {
-        byte[] png = WaylandScreenshotBackend.CapturePng();
+        // Try the zero-dialog ScreenCast+PipeWire path first (isolated in
+        // its own process - see WaylandScreenCastCapture.cs/uictl-screencapture's
+        // own doc comments for why), falling back to the always-works but
+        // per-call-dialog portal Screenshot path on any failure.
+        byte[] png = WaylandScreenCastCapture.TryCapturePng() ?? WaylandScreenshotBackend.CapturePng();
         var (fullRgba, fullW, fullH) = PngCodec.Decode(png);
         if ((int)captureFrame.X == 0 && (int)captureFrame.Y == 0 && width == fullW && height == fullH)
             return fullRgba;

@@ -33,7 +33,31 @@ internal static class WaylandScreenCastBackend
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".uictl", "screencast-restore-token");
 
     private const uint SourceTypeMonitor = 1;
-    private const uint CursorModeHidden = 1;
+
+    /// <summary>
+    /// SPA/xdg-desktop-portal defines Hidden=1, Embedded=2, Metadata=4 for
+    /// cursor_mode. Embedded (cursor drawn directly into the captured
+    /// frame) is used here - matches what most screenshot tools show by
+    /// default. A fixed choice, not queried from ScreenCast's own
+    /// AvailableCursorModes property first - see ENGINEERING.md's "Wayland
+    /// screenshot" section for a real, live-diagnosed false alarm this
+    /// caused: mid-development, *every* cursor_mode value started failing
+    /// with "Unavailable cursor mode N", including ones confirmed working
+    /// minutes earlier, and the actual cause turned out to be
+    /// `xdg-desktop-portal.service` (the main dispatcher, not the GNOME
+    /// backend) caching a stale `AvailableCursorModes=0` after the backend
+    /// crashed and respawned during rapid repeated testing - restarting
+    /// the dispatcher itself (not just the backend) restored
+    /// `AvailableCursorModes=7`, and this exact code then worked again
+    /// with no changes. Not a reason to add capability-querying here
+    /// preemptively; a hard failure with this specific error message is
+    /// the signal to check `busctl --user get-property
+    /// org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop
+    /// org.freedesktop.portal.ScreenCast AvailableCursorModes` before
+    /// assuming the code regressed.
+    /// </summary>
+    private const uint CursorModeEmbedded = 2;
+
     private const uint PersistModePersistent = 2;
 
     public sealed record Session(SafeHandle PipeWireFd, uint NodeId, ObjectPath SessionHandle, Connection Connection);
@@ -113,7 +137,7 @@ internal static class WaylandScreenCastBackend
         {
             ["types"] = SourceTypeMonitor,
             ["multiple"] = false,
-            ["cursor_mode"] = CursorModeHidden,
+            ["cursor_mode"] = CursorModeEmbedded,
             ["persist_mode"] = PersistModePersistent,
         };
         if (!string.IsNullOrEmpty(restoreToken))

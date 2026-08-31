@@ -61,6 +61,10 @@ apt_install libgtk-4-1 libadwaita-1-0
 check gtk4Runtime dpkg -s libgtk-4-1
 check libadwaitaRuntime dpkg -s libadwaita-1-0
 
+echo "==> PipeWire (uictl-screencapture's zero-dialog Wayland screenshot path)"
+apt_install libpipewire-0.3-0t64
+check pipewireRuntime dpkg -s libpipewire-0.3-0t64
+
 echo "==> 'input' group membership"
 if id -nG "$USER" | grep -qw input; then
 	check inputGroup true
