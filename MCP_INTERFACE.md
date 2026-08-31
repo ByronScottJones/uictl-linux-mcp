@@ -392,13 +392,44 @@ Same behavior and redaction rules as macOS/Windows (toast per call, capped
 ~2000-entry in-memory log, `text` redacted only for `type`/`clipboard.set`/
 `clipboard.get`, `ocr`/`elements`/`screenshot` output never redacted).
 
-- Linux: the window is a GTK4/libadwaita `Adw.Window` with a
-  `Gtk.ColumnView` (via Gir.Core), the GNOME-native equivalent of macOS's
-  `NSTableView`/Windows' `DataGrid`.
+- Linux: `uictl-gui` (`src/UICtl.Gui`, GTK4/libadwaita via Gir.Core) is a
+  single long-lived `Adw.Application` process, lazily launched by the
+  daemon on the first real command and reused for the rest of the
+  session - a second `uictl-gui`/`uictl-gui --show-log` invocation
+  registers, discovers it's not the primary instance (`Gio.Application.IsRemote`),
+  and forwards to the already-running one via a named `GAction`
+  (`show-log`) rather than starting redundant work. The toast is its own
+  small `Adw.Window` that updates in place and resets a 5s fade timer on
+  every new command - a persistent indicator, not a native
+  `org.freedesktop.Notifications` popup, specifically to avoid spamming
+  the desktop notification center during a busy automation session. The
+  `log show` window itself is a scrolling read-only `Gtk.TextView`
+  (monospace, three lines per command - the summary line plus indented
+  `params:`/`result:` lines with the full JSON), not a `Gtk.ColumnView` -
+  that needs a custom GObject-derived row type in C# that Gir.Core
+  doesn't shortcut; a possible future upgrade, not built yet. Wayland
+  gives a client no API to position its own top-level window (unlike
+  X11/Windows/macOS), so the toast can't pin itself to a screen corner
+  the way a native notification would - it appears wherever the
+  compositor places it. Opening the window backfills full history (a
+  one-time unfiltered `__log_list__` call, separate from the ongoing
+  poll's own cursor) rather than only showing entries from the moment
+  it's opened onward. An "Export" button in the header bar calls
+  `log.export` and shows the resulting path in a modal `Adw.MessageDialog`
+  - deliberately not a toast: `log.export` is itself a logged command, so
+  the general per-call toast fires for it at essentially the same moment,
+  confirmed live to cover an in-window toast version of this message. The
+  built-in GTK4 text-view context menu's Copy/Select All were confirmed
+  live to render permanently insensitive (cause not identified - not
+  something this code disables); a "Copy log" item was added to the same
+  menu via `SetExtraMenu`, wired to a working action, rather than chasing
+  that further.
 
 **Commands-enabled kill switch.** Same escape-hatch semantics as
 macOS/Windows: the toggle only takes effect while the window is open, and
-there is no command to disable commands, only the on-screen checkbox.
+there is no command to disable commands, only the on-screen checkbox
+(internally, an undocumented `__gate_set__` command only `uictl-gui`
+calls - never registered in the CLI/MCP tool surface).
 
 ### Remote testing over SSH (Linux)
 

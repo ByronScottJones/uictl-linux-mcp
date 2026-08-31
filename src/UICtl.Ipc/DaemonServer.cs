@@ -89,7 +89,18 @@ public static class DaemonServer
 
         var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         socket.Bind(new UnixDomainSocketEndPoint(DaemonPaths.SocketPath));
-        socket.Listen(backlog: 1);
+        // A backlog of 1 was fine when only occasional, human-paced CLI
+        // calls connected, but UICtl.Gui (Phase 5) polls every ~300ms in
+        // the background - confirmed live: with backlog 1, a second client
+        // connecting while that poll's connection is still pending gets
+        // refused outright, DaemonClient.Connect() reads that as "the
+        // daemon is dead" and spawns a redundant one (which exits quickly
+        // once Bind() here hits "address already in use", since the real
+        // daemon is fine - not a duplicate daemon problem), then retries
+        // for up to 5s - from the outside this looked exactly like the
+        // whole daemon hanging. 16 gives enough queue depth that a request
+        // arriving mid-poll just waits its turn instead of being refused.
+        socket.Listen(backlog: 16);
         return socket;
     }
 

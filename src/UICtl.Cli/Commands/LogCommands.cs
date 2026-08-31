@@ -8,9 +8,14 @@ internal static class LogCommands
     {
         var cmd = new Command("log", "Inspect the daemon's activity log - every command it has handled, capped at ~2000 entries.");
         cmd.Add(Export());
-        // `log show` (a live GTK4/libadwaita window) is a deliberate
-        // follow-up - the data/redaction/export side lands here first,
-        // see ENGINEERING.md.
+        cmd.Add(Show());
+        return cmd;
+    }
+
+    private static Command Show()
+    {
+        var cmd = new Command("show", "Open the live activity log window (GTK4/libadwaita) - also hosts the \"commands enabled\" kill switch, which only takes effect while this window is open.");
+        cmd.SetAction(async (_, ct) => await CliRunner.RunAsync("log.show", new Dictionary<string, object?>(), ct));
         return cmd;
     }
 

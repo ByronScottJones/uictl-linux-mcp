@@ -25,11 +25,11 @@ public static class Permissions
         string sessionType = SessionDetection.SessionType;
 
         bool uinputWritable = UinputDevice.ProbeWritable();
-        bool atspiEnabled = TryProbeAtspi();
+        bool atspiEnabled = GetCached(ref _atspiCache, TryProbeAtspi);
 
         // Not applicable on X11 (activate/focus.* use direct Xlib/EWMH
         // there, no Shell extension involved) - only probed on Wayland.
-        bool? shellExtensionConnected = sessionType == "wayland" ? TryProbeShellExtension() : null;
+        bool? shellExtensionConnected = sessionType == "wayland" ? GetCached(ref _shellExtensionCache, TryProbeShellExtension) : null;
 
         bool interactive = (hasWayland || hasX11) && Tmds.DBus.Address.Session is not null;
 
@@ -48,25 +48,71 @@ public static class Permissions
             PreflightChecks: preflight.Checks);
     }
 
-    private static bool TryProbeAtspi()
+    /// <summary>
+    /// Both probes below only ever ran with no deadline at all - fine
+    /// nearly always (a local D-Bus round trip is normally sub-millisecond),
+    /// but live-verified as a real, if intermittent, problem: GNOME Shell's
+    /// own D-Bus service occasionally took as long as ~48s to answer a
+    /// `WaylandWindowBackend.ListWindows()` call (reason unconfirmed - not
+    /// this project's bug to fix, GNOME Shell's own responsiveness is
+    /// outside its control) - and since DaemonServer.cs handles one
+    /// connection at a time, that single slow probe blocked *every* other
+    /// command, including totally unrelated ones, for the same ~48s. A
+    /// diagnostic "can I reach X" check should fail fast, not stall the
+    /// whole daemon waiting for an answer nobody's holding out for -
+    /// `apps.list`/`windows.list` (the real listing operations) stay
+    /// unbounded, since those callers *do* want to wait for a correct
+    /// answer rather than a fast possibly-wrong one.
+    /// </summary>
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// On top of the per-call timeout: a successful probe is trusted for 5
+    /// minutes rather than re-checked on every single `permissions.status`
+    /// call - suggested after the ~48s stall above turned out to be
+    /// GNOME Shell's own occasional slowness, not something a timeout alone
+    /// fully insulates against if a caller (uictl-gui's toast, an agent
+    /// polling permissions in a loop) asks frequently: fewer probes means
+    /// fewer chances to hit that slowness at all. A *failed* probe is never
+    /// cached - if AT-SPI or the Shell extension is down, the next call
+    /// should notice as soon as it's fixed, not wait out the rest of a
+    /// stale 5-minute window.
+    /// </summary>
+    private static readonly TimeSpan ProbeCacheLifetime = TimeSpan.FromMinutes(5);
+
+    private static (bool Value, DateTime CheckedAtUtc)? _atspiCache;
+    private static (bool Value, DateTime CheckedAtUtc)? _shellExtensionCache;
+
+    private static bool GetCached(ref (bool Value, DateTime CheckedAtUtc)? cache, Func<bool> probe)
     {
-        try
-        {
-            Accessibility.ListApps(includeBackground: false);
+        if (cache is { Value: true } hit && DateTime.UtcNow - hit.CheckedAtUtc < ProbeCacheLifetime)
             return true;
-        }
-        catch
-        {
-            return false;
-        }
+
+        bool result = probe();
+        cache = (result, DateTime.UtcNow);
+        return result;
     }
 
-    private static bool TryProbeShellExtension()
+    private static bool TryProbeAtspi() =>
+        TryWithTimeout(() => Accessibility.ListApps(includeBackground: false));
+
+    private static bool TryProbeShellExtension() =>
+        TryWithTimeout(() => new WaylandWindowBackend().ListWindows());
+
+    /// <summary>
+    /// Bounds the *wait*, not the underlying call - Tmds.DBus has no way to
+    /// cancel an in-flight method call once sent, so a timed-out probe's
+    /// Task keeps running to completion on its own thread-pool thread in
+    /// the background rather than actually stopping. Harmless: the daemon's
+    /// accept loop isn't blocked by it (CommandDispatcher.Dispatch already
+    /// returned by the time this gives up), and it doesn't accumulate
+    /// unboundedly since each one eventually finishes on its own.
+    /// </summary>
+    private static bool TryWithTimeout(Action probe)
     {
         try
         {
-            new WaylandWindowBackend().ListWindows();
-            return true;
+            return Task.Run(() => { probe(); return true; }).Wait(ProbeTimeout);
         }
         catch
         {

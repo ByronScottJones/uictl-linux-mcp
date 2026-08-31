@@ -60,6 +60,12 @@ dotnet build -c Release
 The binary lands at `src/UICtl.Cli/bin/Release/net10.0/uictl`. Either
 invoke it by that full path, or put it on `PATH`.
 
+This also builds `src/UICtl.Gui/bin/Release/net10.0/uictl-gui` - the
+toast/`log show` window's own executable, launched automatically by the
+daemon (`GuiLauncher.cs` looks for it on `PATH` first, falling back to
+this exact sibling build-output location so it works out of the box
+right after `dotnet build`, no extra setup needed).
+
 ## Environment constraints — read this before filing a "bug"
 
 Linux/GNOME is not just a third coat of paint over the same primitives macOS
