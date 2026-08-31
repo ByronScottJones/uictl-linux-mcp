@@ -4,3 +4,4 @@ obj/
 .idea/
 *.user
 *.swp
+uictl-activity-log-*.json

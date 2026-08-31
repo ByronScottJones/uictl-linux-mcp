@@ -20,18 +20,43 @@ namespace UICtl.Ipc;
 /// DisplayConfig.cs/Screenshot.cs/Pixel.cs), plus ocr (see Ocr.cs/
 /// TesseractEngine.cs), clipboard.get/clipboard.set (see Clipboard.cs),
 /// and waitFor (see WaitFor.cs) - Phase 4 is done. Phase 5: feedback.*
-/// (see FeedbackStore.cs/FeedbackGitHub.cs) and log.export (see
-/// ActivityLog.cs) - every non-double-underscore command recorded to
-/// ActivityLog from Dispatch itself, so no per-command wiring was
-/// needed. log.show (the GTK4/libadwaita activity-log window) and the
-/// commands-enabled kill switch it hosts are a deliberate follow-up, not
-/// built here - CommandDispatcher still forwards through unconditionally,
-/// no gate to check yet.
+/// (see FeedbackStore.cs/FeedbackGitHub.cs), log.export/log.show (see
+/// ActivityLog.cs/GuiLauncher.cs/UICtl.Gui) - every non-double-underscore
+/// command recorded to ActivityLog from Dispatch itself, so no
+/// per-command wiring was needed, and the daemon lazily launches
+/// UICtl.Gui the same way on the first one. The commands-enabled kill
+/// switch (UICtlGate.cs) is checked here too, for every non-internal
+/// command, before Execute runs.
 /// </summary>
 public static class CommandDispatcher
 {
     public static string Dispatch(string command, JsonElement @params)
     {
+        // Double-underscore commands (__ping__, __gate_set__, __log_list__,
+        // ...) are daemon lifecycle/internal plumbing - not gated (so
+        // UICtl.Gui can always re-enable commands even while disabled), not
+        // something a human reviewing "what has this daemon actually done"
+        // cares about (see DaemonServer.cs's own doc comment for
+        // __daemon_log_warning__, handled the same way by never reaching
+        // this method at all), and not what should trigger lazily starting
+        // the GUI helper - a daemon that's only ever received health checks
+        // hasn't done anything a human needs a toast/log window for yet.
+        //
+        // __log_list__ specifically *must* stay exempt from ActivityLog
+        // recording, not just as a style choice: it returns the log's own
+        // current contents, so recording it would make each poll's own
+        // result embed every previous entry (including previous polls'
+        // results, which already embedded everything before *them*) -
+        // confirmed live as a real, fast-onset bug the first time this was
+        // wired up with UICtl.Gui actually polling every 300ms: within a
+        // few seconds this exponential nesting blew past System.Text.Json's
+        // serialization depth limit and the resulting oversized object
+        // graph made the single-connection-at-a-time daemon (DaemonServer.cs)
+        // slow enough on every subsequent request that it looked hung from
+        // the outside.
+        bool isInternal = command.StartsWith("__", StringComparison.Ordinal);
+        if (!isInternal) GuiLauncher.EnsureStarted();
+
         var stopwatch = Stopwatch.StartNew();
         object? result = null;
         string? error = null;
@@ -39,6 +64,8 @@ public static class CommandDispatcher
         string response;
         try
         {
+            if (!isInternal && !UICtlGate.Enabled)
+                throw new UiCtlException("commands are currently disabled - see the uictl activity log window");
             result = Execute(command, @params);
             response = Envelope.Success(result);
             success = true;
@@ -50,12 +77,7 @@ public static class CommandDispatcher
         }
         stopwatch.Stop();
 
-        // Double-underscore commands (__ping__ etc.) are daemon lifecycle/
-        // health-check plumbing, not something a human reviewing "what has
-        // this daemon actually done" cares about - see DaemonServer.cs's
-        // own doc comment for __daemon_log_warning__, handled the same way
-        // by never reaching this method at all.
-        if (!command.StartsWith("__", StringComparison.Ordinal))
+        if (!isInternal)
             ActivityLog.Record(command, @params, success, result, error, stopwatch.Elapsed);
 
         return response;
@@ -64,6 +86,8 @@ public static class CommandDispatcher
     private static object Execute(string command, JsonElement p) => command switch
     {
         "__ping__" => new Dictionary<string, object?> { ["pong"] = true },
+        "__gate_set__" => GateSet(p),
+        "__log_list__" => LogList(p),
 
         "apps.list" => new Dictionary<string, object?> { ["apps"] = Accessibility.ListApps(p.GetBoolOrDefault("all")) },
         "windows.list" => WindowsList(p),
@@ -93,6 +117,7 @@ public static class CommandDispatcher
         "feedback.checkDuplicates" => FeedbackCheckDuplicates(p),
         "feedback.submit" => FeedbackSubmit(p),
         "log.export" => LogExport(p),
+        "log.show" => LogShow(),
 
         _ => throw new UiCtlException($"not implemented yet: {command}"),
     };
@@ -262,6 +287,29 @@ public static class CommandDispatcher
         var entry = FeedbackStore.Get(GetIdOrThrow(p));
         var (duplicates, issueUrl, opened) = FeedbackGitHub.Submit(entry, p.GetStringOrNull("repo"), p.GetStringOrNull("token"));
         return new Dictionary<string, object?> { ["duplicates"] = duplicates, ["issueUrl"] = issueUrl, ["opened"] = opened };
+    }
+
+    /// <summary>UICtl.Gui's own polling call - double-underscore-prefixed (`__log_list__`) so it's exempt from ActivityLog recording (see Dispatch's own doc comment for why that's load-bearing, not just style) and never registered in the public CLI/MCP surface. `log.export`'s file-writing sibling is the one humans/scripts use.</summary>
+    private static Dictionary<string, object?> LogList(JsonElement p)
+    {
+        IEnumerable<ActivityLogEntry> entries = ActivityLog.GetAll();
+        if (p.GetIntOrNull("afterId") is { } afterId)
+            entries = entries.Where(e => e.Id > afterId);
+        return new Dictionary<string, object?> { ["entries"] = entries.ToList() };
+    }
+
+    /// <summary>UICtl.Gui-only - the `__gate_set__` name is double-underscore-prefixed deliberately (see Dispatch's own isInternal check), so toggling it is itself exempt from the gate it controls and isn't recorded as activity-log noise, and it's never registered in the CLI/MCP command surface - "no command to disable commands, only the on-screen checkbox" per MCP_INTERFACE.md.</summary>
+    private static Dictionary<string, object?> GateSet(JsonElement p)
+    {
+        bool enabled = p.GetBoolOrDefault("enabled", true);
+        UICtlGate.Set(enabled);
+        return new Dictionary<string, object?> { ["enabled"] = enabled };
+    }
+
+    private static Dictionary<string, object?> LogShow()
+    {
+        GuiLauncher.ShowLogWindow();
+        return new Dictionary<string, object?> { ["shown"] = true };
     }
 
     private static Dictionary<string, object?> LogExport(JsonElement p)

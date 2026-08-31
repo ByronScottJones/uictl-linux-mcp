@@ -56,6 +56,11 @@ echo "==> xdg-utils (feedback submit's browser-open)"
 apt_install xdg-utils
 check xdgOpen command -v xdg-open
 
+echo "==> GTK4 / libadwaita (uictl-gui's toast + log show window)"
+apt_install libgtk-4-1 libadwaita-1-0
+check gtk4Runtime dpkg -s libgtk-4-1
+check libadwaitaRuntime dpkg -s libadwaita-1-0
+
 echo "==> 'input' group membership"
 if id -nG "$USER" | grep -qw input; then
 	check inputGroup true
