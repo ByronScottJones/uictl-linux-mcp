@@ -5,6 +5,7 @@
     <Project Path="src/UICtl.Gui/UICtl.Gui.csproj" />
     <Project Path="src/UICtl.Ipc/UICtl.Ipc.csproj" />
     <Project Path="src/UICtl.Mcp/UICtl.Mcp.csproj" />
+    <Project Path="src/UICtl.ScreenCapture/UICtl.ScreenCapture.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/UICtl.Core.Tests/UICtl.Core.Tests.csproj" />

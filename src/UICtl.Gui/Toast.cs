@@ -12,15 +12,22 @@ namespace UICtl.Gui;
 ///
 /// Window placement is whatever GNOME's Wayland compositor decides -
 /// Wayland deliberately gives a client no API to position its own
-/// top-level window (unlike X11/Windows/macOS), so this can't pin itself
-/// to a screen corner the way a real desktop notification does. Flagging
-/// this as a known, structural Wayland limitation rather than something
-/// to keep chasing.
+/// top-level window (unlike X11/Windows/macOS), and this GNOME/Mutter
+/// build was confirmed (a raw Wayland registry dump) to not implement
+/// `wlr-layer-shell` either, the one protocol that would let a client
+/// anchor itself to a screen corner - so this can't pin itself the way a
+/// real desktop notification does, a known structural limitation, not
+/// something to keep chasing. `SetSuppressed` is the practical
+/// workaround for the one case this actually mattered in practice (a
+/// leftover toast sitting in the middle of a screenshot) - see
+/// ToastSuppression.cs in UICtl.Core.
 /// </summary>
 internal sealed class Toast
 {
     private readonly Adw.Window _window;
     private readonly Gtk.Label _label;
+    private bool _suppressed;
+    private bool _wantsVisible;
 
     public Toast(Adw.Application app)
     {
@@ -98,8 +105,12 @@ internal sealed class Toast
 
         _label.SetText($"{icon} {command} ({durationMs:F0}ms)");
         _window.RemoveCssClass("uictl-faded");
-        _window.SetVisible(true);
-        _window.Present();
+        _wantsVisible = true;
+        if (!_suppressed)
+        {
+            _window.SetVisible(true);
+            _window.Present();
+        }
     }
 
     public void FadeOut()
@@ -110,8 +121,33 @@ internal sealed class Toast
         GLib.Functions.TimeoutAdd(0, 450, () =>
         {
             if (_window.HasCssClass("uictl-faded")) // a new call may have already un-faded it
+            {
                 _window.SetVisible(false);
+                _wantsVisible = false;
+            }
             return false;
         });
+    }
+
+    /// <summary>
+    /// Forces the window hidden regardless of its normal update/fade
+    /// lifecycle, and restores whatever visibility it "should" have
+    /// (per that lifecycle - _wantsVisible) once un-suppressed. See
+    /// ToastSuppression.cs in UICtl.Core for why this exists: Wayland
+    /// gives this window no way to move itself out of the way of a
+    /// screenshot, so hiding it for the moment that matters is the
+    /// practical alternative.
+    /// </summary>
+    public void SetSuppressed(bool suppressed)
+    {
+        if (_suppressed == suppressed) return;
+        _suppressed = suppressed;
+        if (suppressed)
+            _window.SetVisible(false);
+        else if (_wantsVisible)
+        {
+            _window.SetVisible(true);
+            _window.Present();
+        }
     }
 }

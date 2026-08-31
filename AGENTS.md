@@ -153,13 +153,18 @@ implement an ATK/AT-SPI bridge properly) don't expose useful nodes via
   `type` even though the immediately-following `elements` call showed
   `"value": null`. Don't treat a null `value` as proof `type` failed;
   cross-check some other visible effect (title, a re-render, `ocr`) instead.
-- **`screenshot`/`pixel` show a real consent dialog on every call on
-  Wayland.** X11 is instant. On Wayland there is currently no zero-dialog
-  path (`org.freedesktop.portal.Screenshot`'s documented "reuse a stored
-  grant" mode doesn't work here - see `ENGINEERING.md`'s "Wayland
-  screenshot" section) - warn a human before calling either on a Wayland
-  session, the same way you'd warn before synthesizing input, and don't
-  call `pixel` in a polling loop there.
+- **`screenshot`/`pixel` may show a consent dialog on Wayland - warn a
+  human first, same as before synthesizing input.** X11 is always
+  instant. On Wayland, the first call (or any call after the saved grant
+  is revoked/expired) shows a real source-picker dialog needing a manual
+  click; every later call is silent (`org.freedesktop.portal.ScreenCast`
+  + PipeWire, isolated in its own `uictl-screencapture` process - see
+  `ENGINEERING.md`'s "Wayland screenshot" section). If that path is
+  ever unavailable (helper missing, crash, timeout), it falls back to
+  `org.freedesktop.portal.Screenshot`, which *does* show a dialog on
+  every single call with no one-time grant. Either way: still don't call
+  `pixel` in a polling loop on Wayland (no cheap single-pixel primitive
+  there regardless of which capture path serves it).
 - **The daemon caches state.** If you rebuild `uictl` during development,
   run `uictl daemon stop` before your next command.
 - **Screenshots/OCR/elements output isn't redacted.** Unlike `type` and

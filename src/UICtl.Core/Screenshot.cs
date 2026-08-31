@@ -96,7 +96,28 @@ public static class Screenshot
 
     private static byte[] CaptureWaylandCropped(Frame captureFrame, int width, int height)
     {
-        byte[] png = WaylandScreenshotBackend.CapturePng();
+        // Try the zero-dialog ScreenCast+PipeWire path first (isolated in
+        // its own process - see WaylandScreenCastCapture.cs/uictl-screencapture's
+        // own doc comments for why), falling back to the always-works but
+        // per-call-dialog portal Screenshot path on any failure.
+        //
+        // ToastSuppression tells uictl-gui's toast to stay hidden for the
+        // duration - Wayland gives this project no API to position that
+        // window (confirmed: this GNOME/Mutter build doesn't implement
+        // wlr-layer-shell, the only protocol that would let a client
+        // anchor to a screen corner - see ENGINEERING.md), so a leftover
+        // toast from an earlier command can otherwise sit in the middle
+        // of whatever this call captures.
+        byte[] png;
+        ToastSuppression.Suppress();
+        try
+        {
+            png = WaylandScreenCastCapture.TryCapturePng() ?? WaylandScreenshotBackend.CapturePng();
+        }
+        finally
+        {
+            ToastSuppression.Unsuppress();
+        }
         var (fullRgba, fullW, fullH) = PngCodec.Decode(png);
         if ((int)captureFrame.X == 0 && (int)captureFrame.Y == 0 && width == fullW && height == fullH)
             return fullRgba;

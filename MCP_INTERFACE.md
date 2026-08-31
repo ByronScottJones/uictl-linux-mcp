@@ -242,15 +242,20 @@ since the underlying concepts differ:
 `uictl_elements` below).
 
 - Linux, X11 backend: instant, no permission prompt (`XGetImage`).
-- Linux, Wayland backend: **every single call shows a real modal consent
-  dialog requiring a manual click** (`org.freedesktop.portal.Screenshot`
-  with `interactive: true` — the only variant confirmed to actually work,
-  live-tested repeatedly; see `ENGINEERING.md`'s "Wayland screenshot"
-  section for what was tried and ruled out). Not a one-time grant like
-  macOS's Screen Recording permission — this is a real, currently
-  unresolved divergence from the other two platforms, not yet fixed by
-  the ScreenCast+PipeWire path `ENGINEERING.md` documents as the likely
-  real fix. Don't call this in an unattended loop on a Wayland session.
+- Linux, Wayland backend: tries `org.freedesktop.portal.ScreenCast`+PipeWire
+  first, matching macOS's one-time Screen Recording grant — a real
+  source-picker dialog on the *first* call (choose a monitor, click
+  Share), then silent on every later call via a saved `restore_token`
+  (live-verified repeatedly, including through the real daemon, not just
+  in isolation). Runs in its own process (`uictl-screencapture`), spawned
+  per call with a 20s timeout, so a crash in that genuinely risky native
+  PipeWire interop can't take the daemon down — any failure there
+  (helper missing, crash, timeout) transparently falls back to
+  `org.freedesktop.portal.Screenshot` with `interactive: true`, which
+  *does* show a real modal consent dialog on every call, no one-time
+  grant available through that interface. See `ENGINEERING.md`'s
+  "Wayland screenshot" section for both paths' full history, including
+  three real gotchas hit building the ScreenCast path.
 - Linux: `--annotate` requires `--app`/`--window` (elements are walked
   from one resolved window, there is no "walk the whole desktop"
   primitive) — throws if neither is given. Inherits the same nested-element
@@ -344,10 +349,11 @@ crossing platforms must translate this themselves.
 - Linux, Wayland backend: **genuinely more expensive than the other
   platforms** — there is no cheap single-pixel read primitive under
   Wayland; the value is sampled from a full captured screenshot (see
-  `uictl_screenshot` above), including that same real per-call consent
-  dialog. Document this in caller-facing docs (`AGENTS.md`) rather than
-  quietly making `pixel` slow and unexplained; don't use it in a tight
-  polling loop on a Wayland session the way you might on macOS/Windows.
+  `uictl_screenshot` above, including which path - silent ScreenCast or
+  dialog-per-call fallback - actually served it). Document this in
+  caller-facing docs (`AGENTS.md`) rather than quietly making `pixel`
+  slow and unexplained; don't use it in a tight polling loop on a
+  Wayland session the way you might on macOS/Windows.
 
 ### `uictl_clipboard_get` / `uictl_clipboard_set`
 
@@ -411,7 +417,15 @@ Same behavior and redaction rules as macOS/Windows (toast per call, capped
   gives a client no API to position its own top-level window (unlike
   X11/Windows/macOS), so the toast can't pin itself to a screen corner
   the way a native notification would - it appears wherever the
-  compositor places it. Opening the window backfills full history (a
+  compositor places it (confirmed this GNOME/Mutter build doesn't
+  implement `wlr-layer-shell` either, the one protocol that would allow
+  it, via a raw Wayland registry dump). Since this meant a leftover
+  toast could sit in the middle of a `screenshot`/`pixel`/`ocr` capture,
+  `Screenshot.cs` signals the toast to hide for the duration of a
+  Wayland capture (`ToastSuppression.cs`, a polled file flag - the
+  daemon has no other way to reach `uictl-gui`, which only ever connects
+  *to* the daemon, never the reverse) rather than trying to solve
+  positioning. Opening the window backfills full history (a
   one-time unfiltered `__log_list__` call, separate from the ongoing
   poll's own cursor) rather than only showing entries from the moment
   it's opened onward. An "Export" button in the header bar calls

@@ -64,7 +64,12 @@ This also builds `src/UICtl.Gui/bin/Release/net10.0/uictl-gui` - the
 toast/`log show` window's own executable, launched automatically by the
 daemon (`GuiLauncher.cs` looks for it on `PATH` first, falling back to
 this exact sibling build-output location so it works out of the box
-right after `dotnet build`, no extra setup needed).
+right after `dotnet build`, no extra setup needed) - and
+`src/UICtl.ScreenCapture/bin/Release/net10.0/uictl-screencapture`, the
+same lazy-lookup pattern (`WaylandScreenCastCapture.cs`) for the
+zero-dialog Wayland screenshot path (see ENGINEERING.md's "Wayland
+screenshot" section); its absence just means Wayland screenshots always
+fall back to the per-call-dialog path, not a hard failure.
 
 ## Environment constraints — read this before filing a "bug"
 
