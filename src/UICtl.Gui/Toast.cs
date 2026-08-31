@@ -24,25 +24,69 @@ internal sealed class Toast
 
     public Toast(Adw.Application app)
     {
+        // background-color here must be a fully opaque color, not
+        // libadwaita's `.card` class (its background token is
+        // intentionally semi-transparent, meant to be layered over an
+        // already-opaque window) - confirmed live: pairing an opaque-
+        // looking `.card` box with a transparent window made the whole
+        // toast see-through and hard to read against the desktop behind
+        // it. @window_bg_color is the theme's normal, fully-opaque window
+        // background, so only the corners end up transparent (clipped by
+        // the compositor via border-radius), not the text-bearing interior.
         var cssProvider = Gtk.CssProvider.New();
-        cssProvider.LoadFromString(".uictl-toast { transition: opacity 400ms ease-out; opacity: 1; } .uictl-toast.uictl-faded { opacity: 0; }");
+        cssProvider.LoadFromString("""
+            window.uictl-toast {
+                background-color: @window_bg_color;
+                border-radius: 12px;
+                border: 1px solid alpha(currentColor, 0.15);
+                transition: opacity 400ms ease-out;
+                opacity: 1;
+            }
+            window.uictl-toast.uictl-faded { opacity: 0; }
+            """);
         Gtk.StyleContext.AddProviderForDisplay(Gdk.Display.GetDefault()!, cssProvider, 600 /* GTK_STYLE_PROVIDER_PRIORITY_APPLICATION */);
 
         _window = Adw.Window.New();
-        _window.SetDefaultSize(360, 72);
+        _window.SetDefaultSize(360, 84);
         _window.SetTitle("uictl activity");
         _window.SetDecorated(false);
         _window.SetResizable(false);
         _window.AddCssClass("uictl-toast");
         app.AddWindow(_window);
 
+        // A branding row ("uictl" + icon) above the per-call status line -
+        // an undecorated window has no titlebar to show its own title in
+        // (that's the whole point, for a toast), so without this there's
+        // nothing on screen identifying which app the popup belongs to.
+        var appIcon = Gtk.Image.NewFromIconName("utilities-terminal-symbolic");
+        appIcon.SetPixelSize(14);
+        appIcon.AddCssClass("dim-label");
+
+        var appLabel = Gtk.Label.New("uictl-linux-mcp");
+        appLabel.AddCssClass("caption-heading");
+        appLabel.AddCssClass("dim-label");
+        appLabel.SetXalign(0);
+
+        var brandRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
+        brandRow.Append(appIcon);
+        brandRow.Append(appLabel);
+
         _label = Gtk.Label.New("");
         _label.SetWrap(true);
-        _label.SetMarginTop(12);
-        _label.SetMarginBottom(12);
-        _label.SetMarginStart(16);
-        _label.SetMarginEnd(16);
-        _window.SetContent(_label);
+        _label.SetXalign(0);
+
+        // The window itself (not this box) carries the opaque background,
+        // rounded corners, and border set up above - this box is just
+        // layout/padding.
+        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
+        card.SetMarginTop(12);
+        card.SetMarginBottom(12);
+        card.SetMarginStart(16);
+        card.SetMarginEnd(16);
+        card.Append(brandRow);
+        card.Append(_label);
+
+        _window.SetContent(card);
     }
 
     public void Update(JsonElement entry)
