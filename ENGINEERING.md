@@ -447,6 +447,45 @@ eye (a real screenshot of the desktop, not garbage/inverted-channel
 pixels), and the dialog-based fallback confirmed to still work correctly
 when the helper binary is unavailable.
 
+**Investigated 2026-08-31, blocked by an upstream binding bug, not a
+GNOME limitation:** a real `parent_window` handle (instead of the empty
+`""` this code sends) was suspected as the missing piece for
+`interactive: false`'s stored-permission reuse - all prior testing here
+always sent an empty parent_window, even on a successful
+`interactive: true` call, so the portal may have had nothing to key a
+persisted grant to. Getting a real handle needs GTK4/Wayland's
+`xdg_foreign` export (`gdk_wayland_toplevel_export_handle`, exposed by
+the `GirCore.GdkWayland-4.0` NuGet package - same 0.8.1 version as this
+project's other GirCore packages) from a live, mapped top-level window.
+
+This turned out to be **untestable with the current toolkit**: calling
+`WaylandToplevel.ExportHandle(...)` and invoking the resulting
+`WaylandToplevelExported` callback crashes the process outright -
+`System.Runtime.InteropServices.MarshalDirectiveException: Cannot
+marshal 'parameter #2': SafeHandles cannot be marshaled from unmanaged
+to managed`, thrown from `Gio.Application.Run`'s own argv marshaling on
+return, not from anything in application code. Isolated across three
+independent minimal repros (a throwaway spike using this project's real
+`Interop/PortalInterfaces.cs`; a bare `Adw.Application` + `ExportHandle`
+harness with no D-Bus/portal code at all; the same harness using the
+*legitimate* `WaylandToplevel.NewFromPointer` construction path instead
+of a reflection-based workaround for GirCore's object-wrapper cache) -
+all three crash identically, at the exact moment the native side invokes
+the callback delegate, ruling out an application-level mistake. This
+looks like a genuine bug in `GirCore.GdkWayland-4.0` 0.8.1's marshaling
+of that specific reverse callback, not anything about GNOME's actual
+`xdg_foreign`/portal behavior - the original "no stored-permission
+reuse" finding above is neither confirmed nor refuted by this
+investigation; it's simply still untested. Not pursued further: working
+around a broken third-party binding (hand-rolled `xdg_foreign`
+Wayland-protocol client via raw `libwayland-client` P/Invoke, bypassing
+`GirCore.GdkWayland-4.0` entirely) is a body of work comparable to the
+already-deferred ScreenCast+PipeWire alternative above, not a quick
+follow-up. Revisit if a newer GirCore release fixes this, or if
+ScreenCast+PipeWire gets built instead (it doesn't need a
+`parent_window`/`xdg_foreign` handle at all, sidestepping this bug
+entirely).
+
 ## GNOME Shell extension (Phase 3 — implemented)
 
 `gnome-extension/byronscottjones_uictl-linux-mcp@github.com/` — a small GJS
