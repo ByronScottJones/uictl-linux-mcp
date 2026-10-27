@@ -56,6 +56,9 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        if (SelfReport.TryHandle(args) is { } selfReportExit)
+            return selfReportExit;
+
         var app = Adw.Application.New(AppId, Gio.ApplicationFlags.FlagsNone);
 
         var showLogAction = Gio.SimpleAction.New("show-log", null);

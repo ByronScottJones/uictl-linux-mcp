@@ -54,11 +54,29 @@ success/failure, identical contract to the other two platforms.
 Requires the .NET 10 SDK on Ubuntu 26.04 (GNOME). From this directory:
 
 ```sh
-dotnet build -c Release
+make          # lists every target
+make build    # restore, build, and embed the SBOM + library list
+make test
+make install  # publish, then install under ~/.local (override with PREFIX=)
 ```
 
-The binary lands at `src/UICtl.Cli/bin/Release/net10.0/uictl`. Either
-invoke it by that full path, or put it on `PATH`.
+`make build` prints the full path of each binary it produced. The CLI lands
+at `src/UICtl.Cli/bin/Release/net10.0/uictl`; either invoke it by that full
+path, or `make install` it onto `PATH`. Plain `dotnet build -c Release` still
+works, but the binaries then have no embedded dependency data (see below).
+
+### Dependencies and SBOM
+
+```sh
+make sbom/install   # once: restore the pinned dotnet-CycloneDX tool
+make libs-version   # every shipped library, one "name  version" per line
+make sbom           # CycloneDX JSON to artifacts/sbom/bom.json
+```
+
+`make build` embeds both into `uictl`, `uictl-gui` and `uictl-screencapture`,
+so each answers `--libs-version` and `--sbom` itself. `make publish` also
+writes `bom.json` next to the published binaries (a missing SBOM tool only
+warns there; `make sbom` is strict).
 
 This also builds `src/UICtl.Gui/bin/Release/net10.0/uictl-gui` - the
 toast/`log show` window's own executable, launched automatically by the

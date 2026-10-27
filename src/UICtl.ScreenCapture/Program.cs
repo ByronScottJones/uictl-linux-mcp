@@ -35,9 +35,12 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
+        if (SelfReport.TryHandle(args) is { } selfReportExit)
+            return selfReportExit;
+
         if (args.Length != 1)
         {
-            Console.Error.WriteLine("usage: uictl-screencapture <output-png-path>");
+            Console.Error.WriteLine("usage: uictl-screencapture <output-png-path> | --libs-version | --sbom");
             return 2;
         }
         string outputPath = args[0];

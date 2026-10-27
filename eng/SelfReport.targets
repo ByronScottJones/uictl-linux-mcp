@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    Embeds the generated SBOM and library list (written by `make build` into
+    artifacts/sbom/) so each executable can report their SBOM and
+    library versions without the toolchain. Absent files are skipped: a plain `dotnet build`
+    still works, and the binaries then report that they were built without them.
+  -->
+  <PropertyGroup>
+    <SelfReportDir Condition="'$(SelfReportDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\sbom\</SelfReportDir>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(SelfReportDir)bom.json')">
+    <EmbeddedResource Include="$(SelfReportDir)bom.json" LogicalName="uictl.bom.json" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(SelfReportDir)libs-version.txt')">
+    <EmbeddedResource Include="$(SelfReportDir)libs-version.txt" LogicalName="uictl.libs-version.txt" />
+  </ItemGroup>
+
+</Project>

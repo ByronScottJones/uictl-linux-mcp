@@ -544,6 +544,26 @@ picks up code changes immediately.
 5. Rebuild (`dotnet build`), restart the daemon (`uictl daemon stop`; it
    auto-restarts on the next command) so it picks up the new binary.
 
+## Build system and dependency inventory
+
+The `Makefile` follows `~/.claude/agents/makefile.md`: `help` is the default
+goal, targets are namespaced with `/`, and per-namespace targets live in
+`tasks/Makefile.*` (currently `Makefile.sbom`). Anything beyond a one-liner is
+a script in `scripts/` (`libs-version.sh`, `sbom.sh`, `install.sh`).
+
+Self-reporting binaries: `make build` writes `artifacts/sbom/bom.json` and
+`artifacts/sbom/libs-version.txt` *before* compiling, and
+`eng/SelfReport.targets` (imported by the three executable projects) embeds
+whichever exist as resources. `UICtl.Core/SelfReport.cs` serves them for
+`--libs-version` / `--sbom`, checked first thing in each `Main` so neither
+flag touches the daemon. A binary built without them (plain `dotnet build`)
+exits 1 saying to use `make build`. Both files describe the same shipped set
+(`UICtl.Cli` already pulls in Core, Ipc, Mcp and Gui; `UICtl.ScreenCapture`
+adds nothing beyond Core), and exclude the test project.
+
+The SBOM tool is pinned in the root `dotnet-tools.json`; its command name is
+the case-sensitive `dotnet-CycloneDX`.
+
 ## Project layout
 
 ```

@@ -1,0 +1,13 @@
+.PHONY: sbom sbom/install libs-version
+
+## Install the pinned SBOM tool from dotnet-tools.json
+sbom/install: check/dotnet
+	dotnet tool restore
+
+## Write a CycloneDX SBOM to SBOM_DIR/bom.json
+sbom: deps
+	scripts/sbom.sh --project $(CLI_PROJECT) --out $(SBOM_DIR)
+
+## Print every shipped library and its version
+libs-version: deps
+	@scripts/libs-version.sh $(SHIPPED_PROJECTS)

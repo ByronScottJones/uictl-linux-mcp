@@ -20,4 +20,6 @@
     <RootNamespace>UICtl.Cli</RootNamespace>
   </PropertyGroup>
 
+  <Import Project="..\..\eng\SelfReport.targets" />
+
 </Project>
